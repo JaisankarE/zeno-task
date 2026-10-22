@@ -3,6 +3,7 @@ import { Icon } from '../../components/Icon'
 import { Logo, ZDiamond } from '../../components/Logo'
 import { StationStatusBadge } from '../../components/StatusBadges'
 import { SwapTimeline } from '../../components/SwapTimeline'
+import { config } from '../../config'
 import { cx } from '../../lib/cx'
 import { socTone } from '../../lib/format'
 import { Link } from '../../components/Link'
@@ -11,7 +12,7 @@ import { useZenoStore } from '../../stores/useZenoStore'
 import type { Battery } from '../../types'
 import { KioskMachine, type BoxView } from './KioskMachine'
 import { KioskScreen } from './KioskScreen'
-import { SCENARIOS, useSwapSession, type Scenario } from './useSwapSession'
+import { OPEN_ALL_DOORS, SCENARIOS, stationPacks, useSwapSession, type Scenario } from './useSwapSession'
 
 const UNKNOWN_RFID = 'RF-DEADBEEF'
 
@@ -29,14 +30,14 @@ export function KioskPage({ stationId, riderId }: { stationId?: string; riderId?
 
   // Docked batteries keep charging while the kiosk is open
   useEffect(() => {
-    const id = window.setInterval(() => tickCharging(station.id), 2500)
+    const id = window.setInterval(() => tickCharging(station.id), config.chargeTickMs)
     return () => window.clearInterval(id)
   }, [station.id, tickCharging])
 
   // Return to the start screen a while after a session ends
   useEffect(() => {
     if (!finished) return
-    const id = window.setTimeout(reset, 25000)
+    const id = window.setTimeout(reset, config.kioskResetSeconds * 1000)
     return () => window.clearTimeout(id)
   }, [finished, reset])
 
@@ -46,25 +47,26 @@ export function KioskPage({ stationId, riderId }: { stationId?: string; riderId?
   const lookup = (id: string): Battery =>
     batteries[id] ?? { id, soc: 17, health: 61, cycles: 990, tempC: 33, status: 'in-vehicle', location: 'unknown' }
 
-  const isStationPack = (id: string) => id === session.plan?.sBat1 || id === session.plan?.sBat2
+  const packs = stationPacks(session)
+  const isStationPack = (id: string) => packs.includes(id)
   const insertable = session.hands.filter((h) => !isStationPack(h))
+  const waiting = Object.values(session.tasks)
 
   const boxes: BoxView[] = station.slots.map((slot) => {
-    const inSession = session.plan !== null && slot.no in session.contents
+    const inSession = session.doors.length > 0 && slot.no in session.contents
     const batteryId = inSession ? session.contents[slot.no] : slot.batteryId
-    const open = session.openBox === slot.no
+    const task = session.tasks[slot.no]
+    const open = task !== undefined && task !== 'closed'
     let action: BoxView['action'] = null
-    if (open) {
-      if (session.awaiting === 'insert' && insertable[0]) {
-        action = { label: `Insert ${insertable[0].replace('ZB-', '#')}`, onClick: () => insert(insertable[0]) }
-      } else if (session.awaiting === 'take') {
-        action = { label: 'Take battery', onClick: take }
-      } else if (session.awaiting === 'close') {
-        action =
-          scenario === 'door-timeout'
-            ? { label: 'Rider left…', onClick: () => {} }
-            : { label: 'Close door', onClick: close }
-      }
+    if (task === 'insert' && insertable[0]) {
+      action = { label: `Insert ${insertable[0].replace('ZB-', '#')}`, onClick: () => insert(insertable[0], slot.no) }
+    } else if (task === 'take') {
+      action = { label: 'Take battery', onClick: () => take(slot.no) }
+    } else if (task === 'close') {
+      action =
+        scenario === 'door-timeout'
+          ? { label: 'Rider left…', onClick: () => {} }
+          : { label: 'Close door', onClick: () => close(slot.no) }
     }
     return {
       no: slot.no,
@@ -87,7 +89,7 @@ export function KioskPage({ stationId, riderId }: { stationId?: string; riderId?
       <header className="sticky top-0 z-30 border-b border-white/5 bg-ink-950/80 backdrop-blur-lg">
         <div className="mx-auto flex max-w-[1400px] flex-wrap items-center gap-3 px-5 py-3">
           <Link to="/">
-            <Logo subtitle="Station Kiosk Simulator" />
+            <Logo subtitle={config.kioskSubtitle} />
           </Link>
           <div className="ml-auto flex flex-wrap items-center gap-2">
             <select
@@ -158,8 +160,22 @@ export function KioskPage({ stationId, riderId }: { stationId?: string; riderId?
           </div>
 
           <p className="relative mt-4 text-center text-xs text-slate-500">
-            Flow: <b className="text-slate-300">Collect</b> (empty box ← C.Bat1) → <b className="text-slate-300">Exchange</b> (take S.Bat1, insert C.Bat2) →{' '}
-            <b className="text-slate-300">Dispense</b> (take S.Bat2) → bill to rider app
+            {OPEN_ALL_DOORS ? (
+              <>
+                Flow: one tap opens <b className="text-slate-300">all {config.batteriesPerBike + 1} doors</b> → insert your drained
+                batteries, take the charged ones, close every door → station checks all → bill to rider app
+              </>
+            ) : (
+              <>
+                Flow: <b className="text-slate-300">Collect</b> (empty box ← C.Bat1) →{' '}
+                {config.batteriesPerBike > 1 && (
+                  <>
+                    <b className="text-slate-300">Exchange</b> (take S.Bat, insert next C.Bat) →{' '}
+                  </>
+                )}
+                <b className="text-slate-300">Dispense</b> (take S.Bat{config.batteriesPerBike}) → bill to rider app
+              </>
+            )}
           </p>
         </section>
 
@@ -190,8 +206,8 @@ export function KioskPage({ stationId, riderId }: { stationId?: string; riderId?
           <Panel id="card-reader" step="1" title="Tap an RFID card" subtitle={idle ? 'Pick a rider to start a session' : 'Session in progress'}>
             <div className="scrollbar-thin -mx-1 max-h-[268px] space-y-1.5 overflow-y-auto px-1">
               {cardList.map((c) => {
-                const [b1, b2] = c.batteryIds.map((id) => batteries[id])
-                const low = Math.min(b1.soc, b2.soc)
+                const socs = c.batteryIds.map((id) => batteries[id].soc)
+                const low = Math.min(...socs)
                 const active = session.rfid === c.rfid && !idle
                 return (
                   <button
@@ -215,7 +231,7 @@ export function KioskPage({ stationId, riderId }: { stationId?: string; riderId?
                       <span className="rounded-md bg-rose-500/15 px-1.5 py-0.5 text-[10px] font-bold text-rose-300">BLOCKED</span>
                     ) : (
                       <span className={cx('text-xs font-bold font-tabular', socTone(low) === 'low' ? 'text-rose-400' : socTone(low) === 'mid' ? 'text-amber-300' : 'text-zeno-300')}>
-                        {b1.soc}% · {b2.soc}%
+                        {socs.join('% · ')}%
                       </span>
                     )}
                   </button>
@@ -241,7 +257,7 @@ export function KioskPage({ stationId, riderId }: { stationId?: string; riderId?
           </Panel>
           )}
 
-          <Panel step="2" title="Rider's hands" subtitle={handsHint(session.awaiting, insertable.length > 0)}>
+          <Panel step="2" title="Rider's hands" subtitle={handsHint(waiting, insertable.length > 0)}>
             {session.hands.length === 0 ? (
               <p className="rounded-xl bg-white/[0.03] px-3 py-4 text-center text-xs text-slate-500">
                 {idle ? 'Batteries appear here once a card is verified.' : 'Hands are empty.'}
@@ -252,7 +268,7 @@ export function KioskPage({ stationId, riderId }: { stationId?: string; riderId?
                   const b = lookup(id)
                   const fromStation = isStationPack(id)
                   const foreign = !fromStation && !session.customer?.batteryIds.includes(id)
-                  const canInsert = session.awaiting === 'insert' && !fromStation
+                  const canInsert = waiting.includes('insert') && !fromStation
                   return (
                     <button
                       key={id}
@@ -378,10 +394,10 @@ function RiderCard({
   )
 }
 
-function handsHint(awaiting: string | null, canInsert: boolean) {
-  if (awaiting === 'insert' && canInsert) return 'Tap a drained battery to insert it into the open box'
-  if (awaiting === 'take') return 'Use “Take battery” on the open box'
-  if (awaiting === 'close') return 'Close the open door on the machine'
+function handsHint(waiting: string[], canInsert: boolean) {
+  if (waiting.includes('insert') && canInsert) return 'Tap a drained battery to insert it into an open box'
+  if (waiting.includes('take')) return 'Use “Take battery” on the open box'
+  if (waiting.includes('close')) return 'Close the open door on the machine'
   return 'What the rider is carrying'
 }
 

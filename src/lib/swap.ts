@@ -1,4 +1,5 @@
 import type { FailureCode, StepKey } from '../types'
+import { config } from '../config'
 
 export const FAILURES: Record<
   FailureCode,
@@ -18,7 +19,7 @@ export const FAILURES: Record<
   },
   NO_CHARGED_BATTERY: {
     title: 'No charged battery',
-    message: 'Station has fewer than 2 charged batteries or no empty slot.',
+    message: `Station has fewer than ${config.batteriesPerBike} charged batter${config.batteriesPerBike === 1 ? 'y' : 'ies'} or no empty slot.`,
     resolution: 'Customer redirected to the nearest station.',
     step: 'auth',
   },
@@ -63,28 +64,47 @@ export const FAILURES: Record<
 export const STEP_LABELS: Record<StepKey, string> = {
   auth: 'RFID verified',
   collect: 'Collect · C.Bat1 into empty box',
-  exchange: 'Exchange · take S.Bat1, insert C.Bat2',
-  dispense: 'Dispense · take S.Bat2',
+  exchange:
+    config.batteriesPerBike === 2 ? 'Exchange · take S.Bat1, insert C.Bat2' : 'Exchange · take S.Bat(n), insert C.Bat(n+1)',
+  dispense: `Dispense · take S.Bat${config.batteriesPerBike}`,
   payment: 'Bill posted to customer app',
 }
 
 /** Usable capacity of one Zeno pack in kWh */
-export const PACK_KWH = 1.8
-export const TARIFF_PER_KWH = 28
-export const SERVICE_FEE = 15
+export const PACK_KWH = config.packKwh
+export const TARIFF_PER_KWH = config.tariffPerKwh
+export const SERVICE_FEE = config.serviceFee
 
-export function swapBill(inSoc: [number, number], outSoc: [number, number]) {
-  const energyKwh =
-    ((outSoc[0] - inSoc[0]) / 100) * PACK_KWH + ((outSoc[1] - inSoc[1]) / 100) * PACK_KWH
+export function swapBill(inSoc: number[], outSoc: number[]) {
+  const energyKwh = outSoc.reduce((sum, out, i) => sum + ((out - (inSoc[i] ?? 0)) / 100) * PACK_KWH, 0)
   const kwh = Math.max(0, Math.round(energyKwh * 100) / 100)
   return { energyKwh: kwh, amount: Math.round(kwh * TARIFF_PER_KWH + SERVICE_FEE) }
 }
 
-/** Swap ID is built from the two customer battery IDs (whiteboard rule) plus a timestamp. */
-export function makeSwapId(bat1: string | null, bat2: string | null, at: Date) {
-  const short = (id: string | null) => (id ? id.replace('ZB-', '') : 'XXXX')
+/** Swap ID is built from the customer battery IDs (whiteboard rule) plus a timestamp. */
+export function makeSwapId(customerBatteries: (string | null)[], at: Date) {
+  const short = (id: string | null | undefined) => (id ? id.replace('ZB-', '') : 'XXXX')
+  const ids = Array.from({ length: config.batteriesPerBike }, (_, i) => short(customerBatteries[i]))
   const stamp = `${String(at.getMonth() + 1).padStart(2, '0')}${String(at.getDate()).padStart(2, '0')}${String(at.getHours()).padStart(2, '0')}${String(at.getMinutes()).padStart(2, '0')}`
-  return `SW-${short(bat1)}${short(bat2)}-${stamp}`
+  return `SW-${ids.join('')}-${stamp}`
 }
 
-export const rangeKm = (soc: number) => Math.round(soc * 0.55)
+export type DoorKey = 'collect' | 'exchange' | 'dispense'
+
+/** One door of a swap. `take` is the charged station battery waiting in that box. */
+export type Door = { key: DoorKey; box: number; take: string | null }
+
+/**
+ * Boxes a swap uses, in order: Collect (empty box ← C.Bat1), one Exchange per extra battery
+ * (take S.Bat(n), insert C.Bat(n+1)), then Dispense (take the last S.Bat).
+ */
+export function swapDoors(emptyBox: number, charged: Array<{ box: number; batteryId: string }>): Door[] {
+  const last = charged[charged.length - 1]
+  return [
+    { key: 'collect', box: emptyBox, take: null },
+    ...charged.slice(0, -1).map((c) => ({ key: 'exchange' as const, box: c.box, take: c.batteryId })),
+    { key: 'dispense', box: last.box, take: last.batteryId },
+  ]
+}
+
+export const rangeKm = (soc: number) => Math.round(soc * config.kmPerPercent)

@@ -1,3 +1,4 @@
+import { config } from '../../config'
 import { useMemo, useState } from 'react'
 import { Button, Card, Input, Segmented } from '../../components/ui'
 import { toast } from '../../stores/useToastStore'
@@ -5,7 +6,7 @@ import { useZenoStore } from '../../stores/useZenoStore'
 import type { Swap, SwapStatus } from '../../types'
 import { SwapDetailDrawer, SwapTable } from './SwapRecords'
 
-const PAGE_SIZE = 12
+const PAGE_SIZE = config.swapsPageSize
 
 export const selectClass =
   'h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-700 shadow-sm outline-none focus:border-zeno-500 focus:ring-4 focus:ring-zeno-500/15'
@@ -41,12 +42,13 @@ export function SwapsPage() {
   const count = (st: SwapStatus) => swaps.filter((s) => s.status === st).length
 
   const exportCsv = () => {
-    const header = ['swap_id', 'started_at', 'status', 'failure', 'customer', 'rfid', 'station', 'box_collect', 'box_exchange', 'box_dispense', 'c_bat1', 'c_bat2', 's_bat1', 's_bat2', 'kwh', 'amount', 'payment']
+    const bats = (prefix: string) => Array.from({ length: config.batteriesPerBike }, (_, i) => `${prefix}_bat${i + 1}`)
+    const header = ['swap_id', 'started_at', 'status', 'failure', 'customer', 'rfid', 'station', 'box_collect', 'box_exchange', 'box_dispense', ...bats('c'), ...bats('s'), 'kwh', 'amount', 'payment']
     const lines = filtered.map((s) =>
       [
         s.id, s.startedAt, s.status, s.failure?.code ?? '',
         customers.find((c) => c.id === s.customerId)?.name ?? 'Unknown', s.rfid, s.stationId,
-        s.slots.collect ?? '', s.slots.exchange ?? '', s.slots.dispense ?? '',
+        s.slots.collect ?? '', s.slots.exchange.join(' '), s.slots.dispense ?? '',
         ...s.inBatteries.map((b) => b ?? ''), ...s.outBatteries.map((b) => b ?? ''),
         s.energyKwh, s.amount, s.payment,
       ].map((v) => `"${String(v).replace(/"/g, '""')}"`).join(','),

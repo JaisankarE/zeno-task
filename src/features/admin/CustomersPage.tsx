@@ -1,3 +1,4 @@
+import { config } from '../../config'
 import { useMemo, useState } from 'react'
 import { BatteryBar } from '../../components/Battery'
 import { Icon } from '../../components/Icon'
@@ -55,8 +56,9 @@ export function CustomersPage() {
                 <th className="px-5 py-3">Customer</th>
                 <th className="px-3 py-3">RFID card</th>
                 <th className="px-3 py-3">Vehicle</th>
-                <th className="px-3 py-3">Battery 1</th>
-                <th className="px-3 py-3">Battery 2</th>
+                {Array.from({ length: config.batteriesPerBike }, (_, i) => (
+                  <th key={i} className="px-3 py-3">Battery {i + 1}</th>
+                ))}
                 <th className="px-3 py-3">Plan</th>
                 <th className="px-3 py-3 text-right">Swaps</th>
                 <th className="px-5 py-3 text-right">Dues</th>
@@ -65,7 +67,7 @@ export function CustomersPage() {
             <tbody className="divide-y divide-slate-100">
               {rows.map((c) => {
                 const st = stats.get(c.id)
-                const [b1, b2] = c.batteryIds.map((id) => batteries[id])
+                const packs = c.batteryIds.map((id) => batteries[id])
                 return (
                   <tr key={c.id} onClick={() => setSelected(c)} className="cursor-pointer transition hover:bg-zeno-50/40">
                     <td className="px-5 py-3">
@@ -85,8 +87,9 @@ export function CustomersPage() {
                       <p className="text-slate-700">{c.vehicle.regNo}</p>
                       <p className="text-[11px] text-slate-400">{c.vehicle.model}</p>
                     </td>
-                    <td className="px-3 py-3"><BatteryBar soc={b1.soc} id={b1.id} /></td>
-                    <td className="px-3 py-3"><BatteryBar soc={b2.soc} id={b2.id} /></td>
+                    {packs.map((b) => (
+                      <td key={b.id} className="px-3 py-3"><BatteryBar soc={b.soc} id={b.id} /></td>
+                    ))}
                     <td className="px-3 py-3">
                       <Badge>{c.plan}</Badge>
                     </td>
@@ -128,7 +131,7 @@ export function CustomersPage() {
             </div>
 
             <div>
-              <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-400">Linked batteries (RFID → 2 packs)</p>
+              <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-400">Linked batteries (RFID → {current.batteryIds.length} packs)</p>
               <div className="grid grid-cols-2 gap-3">
                 {current.batteryIds.map((id, i) => {
                   const b = batteries[id]

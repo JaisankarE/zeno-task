@@ -1,3 +1,4 @@
+import { config } from '../../config'
 import type { ReactNode } from 'react'
 import { Icon, type IconName } from '../../components/Icon'
 import { ZDiamond } from '../../components/Logo'
@@ -220,7 +221,7 @@ export function AboutMe() {
         <div className="mt-14 flex flex-col items-center gap-4 rounded-3xl border border-zeno-400/20 bg-gradient-to-br from-zeno-500/15 to-transparent p-8 text-center animate-fade-up">
           <p className="font-display text-2xl font-bold">Zeno EV battery swap — assessment build</p>
           <p className="max-w-lg text-sm text-slate-400">
-            Admin console, rider portal (RFID + OTP) and an interactive 10-box swap station kiosk, all on mock data.
+            Admin console, rider portal (RFID + OTP) and an interactive {config.boxesPerStation}-box swap station kiosk, all on mock data.
           </p>
           <a
             href="/"

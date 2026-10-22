@@ -1,3 +1,5 @@
+import { config } from '../config'
+
 export const inr = (n: number) =>
   new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(n)
 
@@ -29,4 +31,4 @@ export const isToday = (iso: string) => new Date(iso).toDateString() === new Dat
 
 export const maskPhone = (phone: string) => phone.replace(/\d(?=\d{4})/g, '•')
 
-export const socTone = (soc: number) => (soc <= 20 ? 'low' : soc <= 50 ? 'mid' : 'high')
+export const socTone = (soc: number) => (soc <= config.socLow ? 'low' : soc <= config.socMid ? 'mid' : 'high')

@@ -5,7 +5,8 @@ import { cx } from '../../lib/cx'
 import { inr } from '../../lib/format'
 import { FAILURES } from '../../lib/swap'
 import type { Battery, Station } from '../../types'
-import { DOOR_SECONDS, type Session } from './useSwapSession'
+import { config } from '../../config'
+import { DOOR_SECONDS, OPEN_ALL_DOORS, type Session } from './useSwapSession'
 
 /** Everything here is sized in container-query units so it scales with the machine */
 export function KioskScreen({
@@ -23,7 +24,26 @@ export function KioskScreen({
   onCancel: () => void
   onFinish: () => void
 }) {
-  const { phase, customer, plan } = session
+  const { phase, customer, doors } = session
+  const countdown = (
+    <div className="flex items-center gap-[2cqw]">
+      <div className="h-[1.2cqw] flex-1 overflow-hidden rounded-full bg-white/10">
+        <div
+          className={cx('h-full rounded-full transition-[width] duration-300', secondsLeft <= 10 ? 'bg-rose-500' : 'bg-white/40')}
+          style={{ width: `${Math.min(100, (secondsLeft / DOOR_SECONDS) * 100)}%` }}
+        />
+      </div>
+      <span className={cx('w-[8cqw] text-right font-mono text-[2.8cqw]', secondsLeft <= 10 ? 'text-rose-400' : 'text-white/50')}>
+        {secondsLeft}s
+      </span>
+      <button
+        onClick={onCancel}
+        className="rounded-[1.5cqw] border border-white/15 px-[2.4cqw] py-[1cqw] text-[2.6cqw] font-semibold text-white/70 hover:bg-white/10"
+      >
+        Cancel
+      </button>
+    </div>
+  )
 
   if (station.status !== 'online') {
     return (
@@ -65,7 +85,7 @@ export function KioskScreen({
     )
   }
 
-  if (phase === 'welcome' && customer && plan) {
+  if (phase === 'welcome' && customer && doors.length) {
     return (
       <div className="flex h-full flex-col p-[4cqw] animate-fade-in">
         <p className="text-[3cqw] text-white/50">Welcome back</p>
@@ -84,8 +104,13 @@ export function KioskScreen({
         </div>
         <div className="mt-auto flex items-center justify-between text-[2.8cqw] text-white/60">
           <span>
-            Boxes <b className="text-white">{plan.collect}</b> → <b className="text-white">{plan.exchange}</b> →{' '}
-            <b className="text-white">{plan.dispense}</b>
+            {OPEN_ALL_DOORS ? 'Opening boxes ' : 'Boxes '}
+            {doors.map((d, i) => (
+              <span key={d.box}>
+                {i > 0 && (OPEN_ALL_DOORS ? ', ' : ' → ')}
+                <b className="text-white">{d.box}</b>
+              </span>
+            ))}
           </span>
           <span className="flex items-center gap-[1cqw]">
             <span className="size-[3cqw] animate-spin rounded-full border-2 border-zeno-400 border-r-transparent" /> Preparing
@@ -95,43 +120,33 @@ export function KioskScreen({
     )
   }
 
-  if ((phase === 'collect' || phase === 'exchange' || phase === 'dispense') && plan && customer) {
-    const order = ['collect', 'exchange', 'dispense'] as const
-    const idx = order.indexOf(phase)
-    const box = session.openBox
-    let title = ''
-    let body = ''
-    if (phase === 'collect') {
-      title = session.awaiting === 'insert' ? `Insert battery 1 in Box ${box}` : `Close Box ${box}`
-      body = session.awaiting === 'insert' ? 'Put one of your drained batteries in the open box' : 'Push the door shut to continue'
-    } else if (phase === 'exchange') {
-      title =
-        session.awaiting === 'take'
-          ? `Collect charged battery from Box ${box}`
-          : session.awaiting === 'insert'
-            ? `Insert battery 2 in Box ${box}`
-            : `Close Box ${box}`
-      body =
-        session.awaiting === 'take'
-          ? `Take ${plan.sBat1} (${batteries[plan.sBat1].soc}%)`
-          : session.awaiting === 'insert'
-            ? 'Put your second drained battery in the same box'
-            : 'Push the door shut to continue'
-    } else {
-      title = session.awaiting === 'take' ? `Collect battery 2 from Box ${box}` : `Close Box ${box}`
-      body = session.awaiting === 'take' ? `Take ${plan.sBat2} (${batteries[plan.sBat2].soc}%)` : 'Last step — push the door shut'
+  // ---------- One door at a time ----------
+  if ((phase === 'collect' || phase === 'exchange' || phase === 'dispense') && customer) {
+    const idx = session.doorIndex
+    const door = doors[idx]
+    const box = door.box
+    const task = session.tasks[box]
+    const packs = config.batteriesPerBike
+    let title = `Close Box ${box}`
+    let body = 'Push the door shut to continue'
+    if (task === 'insert') {
+      title = `Insert battery ${idx + 1} in Box ${box}`
+      body = idx === 0 ? 'Put one of your drained batteries in the open box' : 'Put your next drained battery in the same box'
+    } else if (task === 'take') {
+      title = phase === 'dispense' ? `Collect battery ${packs} from Box ${box}` : `Collect charged battery from Box ${box}`
+      body = `Take ${door.take} (${batteries[door.take!].soc}%)`
+    } else if (phase === 'dispense') {
+      body = 'Last step — push the door shut'
     }
-    const pct = (secondsLeft / DOOR_SECONDS) * 100
-    const urgent = secondsLeft <= 10
 
     return (
       <div className="flex h-full flex-col p-[3.6cqw] animate-fade-in">
         <div className="flex items-center gap-[1.4cqw]">
-          {order.map((k, i) => (
-            <div key={k} className="flex flex-1 flex-col gap-[0.8cqw]">
+          {doors.map((d, i) => (
+            <div key={d.box} className="flex flex-1 flex-col gap-[0.8cqw]">
               <div className={cx('h-[1cqw] rounded-full', i < idx ? 'bg-zeno-500' : i === idx ? 'bg-zeno-400 animate-pulse' : 'bg-white/10')} />
-              <span className={cx('text-[2.4cqw] font-semibold uppercase tracking-wider', i <= idx ? 'text-zeno-300' : 'text-white/30')}>
-                {i + 1}. {k}
+              <span className={cx('truncate text-[2.4cqw] font-semibold uppercase tracking-wider', i <= idx ? 'text-zeno-300' : 'text-white/30')}>
+                {i + 1}. {d.key}
               </span>
             </div>
           ))}
@@ -144,29 +159,61 @@ export function KioskScreen({
               <p className="font-display text-[10cqw] font-bold">{box}</p>
             </div>
           </div>
-          <div className="min-w-0" key={`${phase}-${session.awaiting}`}>
+          <div className="min-w-0" key={`${idx}-${task}`}>
             <p className="font-display text-[5cqw] font-bold leading-tight text-white animate-fade-up">{title}</p>
             <p className="mt-[1.2cqw] text-[3cqw] leading-snug text-white/55">{body}</p>
           </div>
         </div>
 
-        <div className="flex items-center gap-[2cqw]">
-          <div className="h-[1.2cqw] flex-1 overflow-hidden rounded-full bg-white/10">
-            <div
-              className={cx('h-full rounded-full transition-[width] duration-300', urgent ? 'bg-rose-500' : 'bg-white/40')}
-              style={{ width: `${Math.min(100, pct)}%` }}
-            />
-          </div>
-          <span className={cx('w-[8cqw] text-right font-mono text-[2.8cqw]', urgent ? 'text-rose-400' : 'text-white/50')}>
-            {secondsLeft}s
-          </span>
-          <button
-            onClick={onCancel}
-            className="rounded-[1.5cqw] border border-white/15 px-[2.4cqw] py-[1cqw] text-[2.6cqw] font-semibold text-white/70 hover:bg-white/10"
-          >
-            Cancel
-          </button>
+        {countdown}
+      </div>
+    )
+  }
+
+  // ---------- All doors open together ----------
+  if (phase === 'all-doors' && customer) {
+    const done = doors.filter((d) => session.tasks[d.box] === 'closed').length
+    const todo = (d: (typeof doors)[number]) => {
+      const task = session.tasks[d.box]
+      if (task === 'closed') return 'Closed'
+      if (task === 'take') return `Take ${d.take?.replace('ZB-', '#')}`
+      if (task === 'insert') return 'Insert yours'
+      return 'Close door'
+    }
+
+    return (
+      <div className="flex h-full flex-col p-[3.6cqw] animate-fade-in">
+        <div className="flex items-baseline justify-between">
+          <p className="font-display text-[5cqw] font-bold leading-tight text-white">All doors open</p>
+          <p className="text-[2.8cqw] text-white/50">
+            {done}/{doors.length} closed
+          </p>
         </div>
+        <p className="mt-[0.6cqw] text-[2.8cqw] text-white/55">Swap your batteries in any order, then close every door</p>
+
+        <div className="mt-[2.4cqw] grid flex-1 gap-[1.6cqw]" style={{ gridTemplateColumns: `repeat(${doors.length}, minmax(0, 1fr))` }}>
+          {doors.map((d) => {
+            const closed = session.tasks[d.box] === 'closed'
+            return (
+              <div
+                key={d.box}
+                className={cx(
+                  'flex flex-col items-center justify-center rounded-[2cqw] p-[1.4cqw] text-center',
+                  closed ? 'bg-zeno-500/20 text-zeno-200' : 'bg-white/5 text-white',
+                )}
+              >
+                <p className="text-[2.2cqw] font-semibold uppercase tracking-wider opacity-60">{d.key}</p>
+                <p className="font-display text-[8cqw] font-bold leading-none">{d.box}</p>
+                <p className={cx('mt-[0.8cqw] flex items-center gap-[0.6cqw] text-[2.4cqw] font-semibold', !closed && 'text-zeno-300')}>
+                  {closed && <Icon name="check" className="size-[2.6cqw]" />}
+                  {todo(d)}
+                </p>
+              </div>
+            )
+          })}
+        </div>
+
+        <div className="mt-[2.4cqw]">{countdown}</div>
       </div>
     )
   }
@@ -192,8 +239,8 @@ export function KioskScreen({
         <p className="mt-[2.4cqw] font-display text-[6cqw] font-bold text-white">Swap complete!</p>
         <p className="font-mono text-[2.6cqw] text-white/50">{r.id}</p>
         <div className="mt-[2.4cqw] flex gap-[2cqw]">
-          {r.outBatteries.map((id) => (
-            <span key={id} className="rounded-[1.5cqw] bg-white/5 px-[2.4cqw] py-[1cqw] text-[2.8cqw] text-white/80">
+          {r.outBatteries.map((id, i) => (
+            <span key={id ?? i} className="rounded-[1.5cqw] bg-white/5 px-[2.4cqw] py-[1cqw] text-[2.8cqw] text-white/80">
               <b className="text-zeno-300">{id && batteries[id]?.soc}%</b> {id}
             </span>
           ))}

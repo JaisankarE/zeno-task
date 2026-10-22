@@ -1,3 +1,4 @@
+import { config } from '../../config'
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { Icon } from '../../components/Icon'
 import { Logo, ZDiamond } from '../../components/Logo'
@@ -12,7 +13,7 @@ import { useZenoStore } from '../../stores/useZenoStore'
 import type { Customer } from '../../types'
 
 const OTP_LENGTH = 6
-const RESEND_SECONDS = 30
+const RESEND_SECONDS = config.otpResendSeconds
 
 const newOtp = () => String(Math.floor(100000 + Math.random() * 900000))
 

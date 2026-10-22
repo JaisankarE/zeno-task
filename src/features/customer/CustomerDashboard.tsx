@@ -1,3 +1,4 @@
+import { config } from '../../config'
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { BatteryRing } from '../../components/Battery'
 import { Icon } from '../../components/Icon'
@@ -38,20 +39,22 @@ export function CustomerDashboard() {
 
   if (!customer) return null
 
-  const [b1, b2] = customer.batteryIds.map((id) => batteries[id])
-  const lowest = Math.min(b1.soc, b2.soc)
-  const range = rangeKm(b1.soc) + rangeKm(b2.soc)
+  const packs = customer.batteryIds.map((id) => batteries[id])
+  const lowest = Math.min(...packs.map((b) => b.soc))
+  const range = packs.reduce((km, b) => km + rangeKm(b.soc), 0)
   const dues = swaps.filter((s) => s.payment === 'pending' || s.payment === 'failed')
   const dueTotal = dues.reduce((n, s) => n + s.amount, 0)
   const nearby = stations
     .filter((s) => s.city === customer.city)
     .sort((a, b) => a.distanceKm - b.distanceKm)
-  const best = nearby.find((s) => s.status === 'online' && s.slots.filter((x) => x.state === 'ready').length >= 2)
+  const best = nearby.find(
+    (s) => s.status === 'online' && s.slots.filter((x) => x.state === 'ready').length >= config.batteriesPerBike,
+  )
   const failedCount = swaps.filter((s) => s.status !== 'success').length
 
   /** Testing helper: simulate a long ride so the low-battery → swap flow can be tried */
   const drainBatteries = () => {
-    const targets: Record<string, number> = { [b1.id]: 8, [b2.id]: 11 }
+    const targets: Record<string, number> = Object.fromEntries(packs.map((b, i) => [b.id, i % 2 ? 11 : 8]))
     setDraining(true)
     const timer = window.setInterval(() => {
       const { batteries: live, setBatterySoc } = useZenoStore.getState()
@@ -138,8 +141,8 @@ export function CustomerDashboard() {
               </button>
             </div>
 
-            <div className="flex gap-4 animate-fade-up" style={{ animationDelay: '120ms' }}>
-              {[b1, b2].map((b, i) => (
+            <div className="flex flex-wrap gap-4 animate-fade-up" style={{ animationDelay: '120ms' }}>
+              {packs.map((b, i) => (
                 <div key={b.id} className="rounded-3xl border border-white/10 bg-white/[0.04] p-4 text-center backdrop-blur">
                   <BatteryRing soc={b.soc} label={`Battery ${i + 1}`} />
                   <p className="mt-2 font-mono text-[11px] text-slate-300">{b.id}</p>
@@ -163,7 +166,7 @@ export function CustomerDashboard() {
             body={`You have ${dues.length} unpaid swap bills totalling ${inr(dueTotal)}. Stations will reject your RFID until paid.`}
             action={<Button variant="danger" onClick={() => setPaying(dues)}>Pay {inr(dueTotal)}</Button>}
           />
-        ) : lowest <= 25 ? (
+        ) : lowest <= config.riderLowAlertSoc ? (
           <Alert
             tone="amber"
             icon="battery"
@@ -193,7 +196,7 @@ export function CustomerDashboard() {
             action={<Button onClick={() => setPaying(dues)}>Pay {inr(dueTotal)}</Button>}
           />
         ) : (
-          <Alert tone="green" icon="zap" title="You're good to ride" body={`Both batteries above ${lowest}%. About ${range} km of range left.`} />
+          <Alert tone="green" icon="zap" title="You're good to ride" body={`${packs.length === 1 ? 'Battery' : packs.length === 2 ? 'Both batteries' : 'All batteries'} above ${lowest}%. About ${range} km of range left.`} />
         )}
 
         <div className="flex items-center justify-between">
@@ -423,13 +426,19 @@ function SwapRow({ swap, stationName }: { swap: Swap; stationName: string }) {
             <div className="grid grid-cols-2 gap-3">
               <div className="rounded-xl bg-white p-3 ring-1 ring-slate-200">
                 <p className="text-[11px] font-semibold text-rose-600">You returned</p>
-                <p className="mt-1 font-mono text-[11px] text-slate-700">{swap.inBatteries[0] ?? '—'}</p>
-                <p className="font-mono text-[11px] text-slate-700">{swap.inBatteries[1] ?? '—'}</p>
+                <div className="mt-1">
+                  {swap.inBatteries.map((id, i) => (
+                    <p key={i} className="font-mono text-[11px] text-slate-700">{id ?? '—'}</p>
+                  ))}
+                </div>
               </div>
               <div className="rounded-xl bg-white p-3 ring-1 ring-slate-200">
                 <p className="text-[11px] font-semibold text-zeno-700">You received</p>
-                <p className="mt-1 font-mono text-[11px] text-slate-700">{swap.outBatteries[0] ?? '—'}</p>
-                <p className="font-mono text-[11px] text-slate-700">{swap.outBatteries[1] ?? '—'}</p>
+                <div className="mt-1">
+                  {swap.outBatteries.map((id, i) => (
+                    <p key={i} className="font-mono text-[11px] text-slate-700">{id ?? '—'}</p>
+                  ))}
+                </div>
               </div>
             </div>
             <p className="text-xs text-slate-500">

@@ -1,3 +1,4 @@
+import { config } from '../../config'
 import { useState, type FormEvent } from 'react'
 import { Icon } from '../../components/Icon'
 import { Logo, ZDiamond } from '../../components/Logo'
@@ -56,8 +57,8 @@ export function AdminLogin() {
           </p>
           <div className="mt-8 grid grid-cols-3 gap-3">
             {[
-              ['10', 'boxes / station'],
-              ['2', 'packs / bike'],
+              [String(config.boxesPerStation), 'boxes / station'],
+              [String(config.batteriesPerBike), config.batteriesPerBike === 1 ? 'pack / bike' : 'packs / bike'],
               ['<90s', 'avg swap'],
             ].map(([v, l]) => (
               <div key={l} className="rounded-2xl border border-white/10 bg-white/5 p-4">

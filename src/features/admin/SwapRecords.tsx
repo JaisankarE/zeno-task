@@ -1,3 +1,4 @@
+import { config } from '../../config'
 import { Icon } from '../../components/Icon'
 import { PaymentBadge, SwapStatusBadge } from '../../components/StatusBadges'
 import { SwapTimeline } from '../../components/SwapTimeline'
@@ -13,7 +14,7 @@ export function BoxPath({ swap }: { swap: Swap }) {
   const { collect, exchange, dispense } = swap.slots
   const cells: Array<[string, number | null, string]> = [
     ['C', collect, 'Collect'],
-    ['X', exchange, 'Exchange'],
+    ...Array.from({ length: config.batteriesPerBike - 1 }, (_, j): [string, number | null, string] => [`X${j}`, exchange[j] ?? null, 'Exchange']),
     ['D', dispense, 'Dispense'],
   ]
   return (
@@ -29,7 +30,7 @@ export function BoxPath({ swap }: { swap: Swap }) {
           >
             {n ?? '–'}
           </span>
-          {i < 2 && <Icon name="chevronRight" className="size-3 text-slate-300" />}
+          {i < cells.length - 1 && <Icon name="chevronRight" className="size-3 text-slate-300" />}
         </span>
       ))}
     </div>
@@ -169,13 +170,19 @@ export function SwapDetailDrawer({ swap, onClose }: { swap: Swap | null; onClose
             <div className="mt-3 grid grid-cols-2 gap-3 text-sm">
               <div className="rounded-xl bg-rose-50/60 p-3">
                 <p className="text-[11px] font-semibold text-rose-600">Returned by customer</p>
-                <p className="mt-1.5 font-mono text-xs text-slate-700">C.Bat1 · {swap.inBatteries[0] ?? '—'}</p>
-                <p className="font-mono text-xs text-slate-700">C.Bat2 · {swap.inBatteries[1] ?? '—'}</p>
+                <div className="mt-1.5">
+                  {swap.inBatteries.map((id, i) => (
+                    <p key={i} className="font-mono text-xs text-slate-700">C.Bat{i + 1} · {id ?? '—'}</p>
+                  ))}
+                </div>
               </div>
               <div className="rounded-xl bg-zeno-50/70 p-3">
                 <p className="text-[11px] font-semibold text-zeno-700">Issued by station</p>
-                <p className="mt-1.5 font-mono text-xs text-slate-700">S.Bat1 · {swap.outBatteries[0] ?? '—'}</p>
-                <p className="font-mono text-xs text-slate-700">S.Bat2 · {swap.outBatteries[1] ?? '—'}</p>
+                <div className="mt-1.5">
+                  {swap.outBatteries.map((id, i) => (
+                    <p key={i} className="font-mono text-xs text-slate-700">S.Bat{i + 1} · {id ?? '—'}</p>
+                  ))}
+                </div>
               </div>
             </div>
             <div className="mt-3 flex items-center justify-between text-xs text-slate-500">

@@ -1,3 +1,4 @@
+import { config } from '../config'
 import { FAILURES, STEP_LABELS, makeSwapId, swapBill } from '../lib/swap'
 import type {
   Battery,
@@ -11,7 +12,7 @@ import type {
   SwapStep,
 } from '../types'
 
-export const ADMIN_CREDENTIALS = { username: 'admin', password: 'zeno@123' }
+export const ADMIN_CREDENTIALS = { username: config.adminUsername, password: config.adminPassword }
 
 /** Deterministic PRNG so the demo data is the same on every reset */
 function mulberry32(seed: number) {
@@ -44,8 +45,11 @@ const CUSTOMER_SEED: Array<
 /** Customer index 10 (Suresh) is blocked for overdue payments — a failure case on the kiosk */
 const BLOCKED_INDEX = 10
 
+const PACKS = config.batteriesPerBike
+const BOXES = config.boxesPerStation
+
 const STATION_SEED: Array<[id: string, name: string, area: string, city: string, km: number, status: Station['status'], layout: string]> = [
-  // layout: 10 chars, one per box: e=empty c=charging r=ready f=faulty
+  // layout: one char per box (repeated to VITE_BOXES_PER_STATION): e=empty c=charging r=ready f=faulty
   ['ZS-BLR-01', 'Koramangala Hub', '80 Feet Rd, Koramangala', 'Bengaluru', 1.2, 'online', 'cceFrrcrcr'],
   ['ZS-BLR-02', 'HSR Layout Sector 2', '27th Main, HSR Layout', 'Bengaluru', 3.4, 'online', 'rrcercrrce'],
   ['ZS-BLR-03', 'Indiranagar 100ft', '100 Feet Rd, Indiranagar', 'Bengaluru', 5.8, 'maintenance', 'fceccfeccc'],
@@ -84,8 +88,10 @@ export function createDemoData(now = new Date()): DemoData {
 
   const customers: Customer[] = CUSTOMER_SEED.map(([name, phone, rfid, city, model, regNo, plan, soc], i) => {
     const id = `CU-${pad(i + 101)}`
-    const b1 = newBattery({ soc: soc[0], status: 'in-vehicle', location: id })
-    const b2 = newBattery({ soc: soc[1], status: 'in-vehicle', location: id })
+    // Seed has 2 charge levels; extra packs (VITE_BATTERIES_PER_BIKE > 2) get a similar level
+    const batteryIds = Array.from({ length: PACKS }, (_, j) =>
+      newBattery({ soc: j < 2 ? soc[j] : Math.max(5, soc[j % 2] - 2 * j), status: 'in-vehicle', location: id }),
+    )
     const joined = new Date(now)
     joined.setDate(joined.getDate() - int(40, 420))
     return {
@@ -96,7 +102,7 @@ export function createDemoData(now = new Date()): DemoData {
       rfid,
       city,
       vehicle: { model, regNo },
-      batteryIds: [b1, b2],
+      batteryIds,
       plan,
       status: i === BLOCKED_INDEX ? 'blocked' : 'active',
       joinedAt: joined.toISOString(),
@@ -104,7 +110,9 @@ export function createDemoData(now = new Date()): DemoData {
   })
 
   const stations: Station[] = STATION_SEED.map(([id, name, area, city, km, status, layout]) => {
-    const slots: Slot[] = layout.split('').map((ch, i) => {
+    // Repeat / cut the 10-box pattern to VITE_BOXES_PER_STATION boxes
+    const boxes = Array.from({ length: BOXES }, (_, i) => layout[i % layout.length])
+    const slots: Slot[] = boxes.map((ch, i) => {
       const code = ch.toLowerCase()
       const state: SlotState =
         code === 'e' ? 'empty' : code === 'c' ? 'charging' : code === 'r' ? 'ready' : 'faulty'
@@ -130,7 +138,6 @@ export function createDemoData(now = new Date()): DemoData {
     'BATTERY_MISMATCH', 'BATTERY_MISMATCH', 'DOOR_TIMEOUT', 'DOOR_TIMEOUT', 'DOOR_TIMEOUT',
     'SLOT_JAM', 'BATTERY_FAULT', 'COMM_LOST', 'NO_CHARGED_BATTERY', 'RFID_INVALID', 'RFID_BLOCKED',
   ]
-  const order: StepKey[] = ['auth', 'collect', 'exchange', 'dispense', 'payment']
   const swaps: Swap[] = []
   const activeStations = stations.filter((s) => s.status !== 'offline' || rand() > 0.5)
 
@@ -150,53 +157,66 @@ export function createDemoData(now = new Date()): DemoData {
         status === 'failed' ? pick(failureWeights) : status === 'aborted' ? 'USER_ABORT' : null
 
       const unknownCard = failureCode === 'RFID_INVALID'
-      const cIn: [string, string] = [pick(historyPool), pick(historyPool)]
-      const sOut: [string, string] = [pick(historyPool), pick(historyPool)]
-      const inSoc: [number, number] = [int(5, 30), int(5, 30)]
-      const outSoc: [number, number] = [int(95, 100), int(95, 100)]
-      const slotCollect = int(1, 10)
-      const slotExchange = ((slotCollect + int(1, 4)) % 10) + 1
-      const slotDispense = ((slotExchange + int(0, 3)) % 10) + 1
+      const cIn = Array.from({ length: PACKS }, () => pick(historyPool))
+      const sOut = Array.from({ length: PACKS }, () => pick(historyPool))
+      const inSoc = cIn.map(() => int(5, 30))
+      const outSoc = sOut.map(() => int(95, 100))
+      // PACKS + 1 different boxes: [collect, ...exchange, dispense]
+      const free = Array.from({ length: BOXES }, (_, i) => i + 1)
+      const box = Array.from({ length: PACKS + 1 }, () => free.splice(int(0, free.length - 1), 1)[0])
 
-      const failStep = failureCode
+      // A 1-battery bike has no exchange door, so exchange-stage failures happen at collect
+      let failStep = failureCode
         ? failureCode === 'USER_ABORT'
           ? pick<StepKey>(['collect', 'exchange'])
           : FAILURES[failureCode].step
         : null
-      const reached = failStep ? order.indexOf(failStep) : order.length - 1
+      if (failStep === 'exchange' && PACKS === 1) failStep = 'collect'
+
+      // auth, collect, exchange × (PACKS − 1), dispense, payment
+      const plan: Array<{ key: StepKey; door?: number }> = [
+        { key: 'auth' },
+        ...Array.from({ length: PACKS + 1 }, (_, d) => ({
+          key: (d === 0 ? 'collect' : d === PACKS ? 'dispense' : 'exchange') as StepKey,
+          door: d,
+        })),
+        { key: 'payment' },
+      ]
+      const reached = failStep ? plan.findIndex((p) => p.key === failStep) : plan.length - 1
 
       let t = start.getTime()
       const steps: SwapStep[] = []
-      order.slice(0, reached + 1).forEach((key, idx) => {
+      plan.slice(0, reached + 1).forEach(({ key, door }, idx) => {
         t += idx === 0 ? 4_000 : int(18, 55) * 1000
-        const failed = key === failStep
+        const failed = idx === reached && !!failStep
         const base: SwapStep = { key, label: STEP_LABELS[key], at: new Date(t).toISOString(), ok: !failed }
-        if (key === 'collect') Object.assign(base, { slot: slotCollect, batteryId: cIn[0] })
-        if (key === 'exchange') Object.assign(base, { slot: slotExchange, batteryId: `${sOut[0]} ⇄ ${cIn[1]}` })
-        if (key === 'dispense') Object.assign(base, { slot: slotDispense, batteryId: sOut[1] })
+        if (key === 'collect') Object.assign(base, { slot: box[0], batteryId: cIn[0] })
+        if (key === 'exchange') Object.assign(base, { slot: box[door!], batteryId: `${sOut[door! - 1]} ⇄ ${cIn[door!]}` })
+        if (key === 'dispense') Object.assign(base, { slot: box[PACKS], batteryId: sOut[PACKS - 1] })
         if (failed && failureCode) base.note = FAILURES[failureCode].message
         steps.push(base)
       })
 
       const success = status === 'success'
-      const reachedIdx = (k2: StepKey) => order.indexOf(k2) <= reached
+      // Door d (0 = collect … PACKS = dispense) was reached
+      const doorReached = (d: number) => d + 1 <= reached
       const bill = success ? swapBill(inSoc, outSoc) : { energyKwh: 0, amount: 0 }
       const recent = now.getTime() - start.getTime() < 1000 * 60 * 60 * 36
 
       swaps.push({
-        id: makeSwapId(cIn[0], cIn[1], start),
+        id: makeSwapId(cIn, start),
         customerId: unknownCard ? null : customer.id,
         rfid: unknownCard ? `RF-${int(16 ** 7, 16 ** 8 - 1).toString(16).toUpperCase()}` : customer.rfid,
         stationId: station.id,
         startedAt: start.toISOString(),
         endedAt: new Date(t + 3_000).toISOString(),
         status,
-        inBatteries: [reachedIdx('collect') ? cIn[0] : null, reachedIdx('exchange') ? cIn[1] : null],
-        outBatteries: [success ? sOut[0] : null, success ? sOut[1] : null],
+        inBatteries: cIn.map((id, j) => (doorReached(j) ? id : null)),
+        outBatteries: sOut.map((id) => (success ? id : null)),
         slots: {
-          collect: reachedIdx('collect') ? slotCollect : null,
-          exchange: reachedIdx('exchange') ? slotExchange : null,
-          dispense: reachedIdx('dispense') ? slotDispense : null,
+          collect: doorReached(0) ? box[0] : null,
+          exchange: box.slice(1, PACKS).filter((_, j) => doorReached(j + 1)),
+          dispense: doorReached(PACKS) ? box[PACKS] : null,
         },
         steps,
         failure: failureCode
@@ -238,9 +258,10 @@ export function createDemoData(now = new Date()): DemoData {
     if (last) {
       last.outBatteries = [...c.batteryIds]
       const dispense = last.steps.find((s) => s.key === 'dispense')
-      const exchange = last.steps.find((s) => s.key === 'exchange')
-      if (dispense) dispense.batteryId = c.batteryIds[1]
-      if (exchange) exchange.batteryId = `${c.batteryIds[0]} ⇄ ${last.inBatteries[1]}`
+      if (dispense) dispense.batteryId = c.batteryIds[PACKS - 1]
+      last.steps
+        .filter((s) => s.key === 'exchange')
+        .forEach((s, j) => (s.batteryId = `${c.batteryIds[j]} ⇄ ${last.inBatteries[j + 1]}`))
     }
   }
 

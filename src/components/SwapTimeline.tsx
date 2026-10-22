@@ -9,7 +9,7 @@ export function SwapTimeline({ steps, dark }: { steps: SwapStep[]; dark?: boolea
       {steps.map((step, i) => {
         const last = i === steps.length - 1
         return (
-          <li key={step.key} className="relative flex gap-3 animate-fade-up" style={{ animationDelay: `${i * 70}ms` }}>
+          <li key={`${step.key}-${i}`} className="relative flex gap-3 animate-fade-up" style={{ animationDelay: `${i * 70}ms` }}>
             {!last && (
               <span
                 className={cx(

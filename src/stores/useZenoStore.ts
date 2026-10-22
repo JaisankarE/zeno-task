@@ -1,7 +1,11 @@
+import { config } from '../config'
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { createDemoData, type DemoData } from '../data/mock'
 import type { Swap } from '../types'
+
+/** Saved per machine shape, so changing batteries/boxes in .env starts with fresh demo data */
+const STORAGE_KEY = `zeno-demo-data-${config.batteriesPerBike}p-${config.boxesPerStation}b`
 
 type ZenoState = DemoData & {
   /** Records a kiosk session. Successful swaps move batteries between bike and station. */
@@ -25,17 +29,21 @@ export const useZenoStore = create<ZenoState>()(
           const swaps = [swap, ...state.swaps]
           if (swap.status !== 'success' || !swap.customerId) return { swaps }
 
-          const [cBat1, cBat2] = swap.inBatteries
-          const [sBat1, sBat2] = swap.outBatteries
+          const { inBatteries, outBatteries } = swap
           const { collect, exchange, dispense } = swap.slots
           const batteries = { ...state.batteries }
 
-          for (const id of [sBat1, sBat2]) {
+          for (const id of outBatteries) {
             if (id) batteries[id] = { ...batteries[id], status: 'in-vehicle', location: swap.customerId }
           }
-          for (const id of [cBat1, cBat2]) {
+          for (const id of inBatteries) {
             if (id) batteries[id] = { ...batteries[id], status: 'charging', location: swap.stationId }
           }
+
+          // Collect box gets C.Bat1, each exchange box gets the next C.Bat, the dispense box is left empty
+          const incoming = new Map<number, string | null>()
+          if (collect !== null) incoming.set(collect, inBatteries[0])
+          exchange.forEach((box, j) => incoming.set(box, inBatteries[j + 1]))
 
           const stations = state.stations.map((st) =>
             st.id !== swap.stationId
@@ -43,16 +51,16 @@ export const useZenoStore = create<ZenoState>()(
               : {
                   ...st,
                   slots: st.slots.map((slot) => {
-                    if (slot.no === collect) return { ...slot, state: 'charging' as const, batteryId: cBat1 }
-                    if (slot.no === exchange) return { ...slot, state: 'charging' as const, batteryId: cBat2 }
+                    if (incoming.has(slot.no)) return { ...slot, state: 'charging' as const, batteryId: incoming.get(slot.no)! }
                     if (slot.no === dispense) return { ...slot, state: 'empty' as const, batteryId: null }
                     return slot
                   }),
                 },
           )
 
+          const received = outBatteries.filter((id): id is string => !!id)
           const customers = state.customers.map((c) =>
-            c.id === swap.customerId && sBat1 && sBat2 ? { ...c, batteryIds: [sBat1, sBat2] as [string, string] } : c,
+            c.id === swap.customerId && received.length === outBatteries.length ? { ...c, batteryIds: received } : c,
           )
 
           return { swaps, batteries, stations, customers }
@@ -95,8 +103,8 @@ export const useZenoStore = create<ZenoState>()(
           const slots = station.slots.map((slot) => {
             if (slot.state !== 'charging' || !slot.batteryId) return slot
             const b = batteries[slot.batteryId]
-            const soc = Math.min(100, b.soc + 2)
-            const ready = soc >= 96
+            const soc = Math.min(100, b.soc + config.chargeStepPercent)
+            const ready = soc >= config.readySoc
             batteries[b.id] = { ...b, soc, status: ready ? 'ready' : 'charging' }
             changed = true
             return ready ? { ...slot, state: 'ready' as const } : slot
@@ -111,9 +119,9 @@ export const useZenoStore = create<ZenoState>()(
       resetDemo: () => set(createDemoData()),
     }),
     {
-      name: 'zeno-demo-data',
-      // v2: every swap is billed (no unlimited plan) — old saved data is regenerated
-      version: 2,
+      name: STORAGE_KEY,
+      // v3: any number of batteries per bike / boxes per station — old saved data is regenerated
+      version: 3,
       migrate: () => createDemoData() as unknown as ZenoState,
     },
   ),
@@ -122,6 +130,6 @@ export const useZenoStore = create<ZenoState>()(
 // Keep tabs in sync: a swap on the kiosk tab updates the rider/admin tabs instantly
 if (typeof window !== 'undefined') {
   window.addEventListener('storage', (e) => {
-    if (e.key === 'zeno-demo-data') void useZenoStore.persist.rehydrate()
+    if (e.key === STORAGE_KEY) void useZenoStore.persist.rehydrate()
   })
 }

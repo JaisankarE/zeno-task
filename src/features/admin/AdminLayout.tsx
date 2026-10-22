@@ -1,3 +1,4 @@
+import { config } from '../../config'
 import { useState } from 'react'
 import { Icon, type IconName } from '../../components/Icon'
 import { Logo } from '../../components/Logo'
@@ -19,7 +20,7 @@ const NAV: Array<{ path: string; label: string; icon: IconName; title: string; s
   { path: '/admin', label: 'Overview', icon: 'grid', title: 'Network overview', subtitle: 'Live health of swaps, stations and batteries' },
   { path: '/admin/swaps', label: 'Swap records', icon: 'swap', title: 'Swap records', subtitle: 'Every RFID session with Collect → Exchange → Dispense steps' },
   { path: '/admin/failures', label: 'Failures', icon: 'alert', title: 'Failure analysis', subtitle: 'Failed and aborted swaps, root causes and resolutions' },
-  { path: '/admin/stations', label: 'Stations', icon: 'zap', title: 'Swap stations', subtitle: '10-box machines and live slot status' },
+  { path: '/admin/stations', label: 'Stations', icon: 'zap', title: 'Swap stations', subtitle: `${config.boxesPerStation}-box machines and live slot status` },
   { path: '/admin/customers', label: 'Customers', icon: 'users', title: 'Customers', subtitle: 'Riders, RFID cards and linked batteries' },
   { path: '/admin/batteries', label: 'Batteries', icon: 'battery', title: 'Battery fleet', subtitle: 'State of charge, health and location of every pack' },
 ]

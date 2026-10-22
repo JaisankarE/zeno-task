@@ -21,7 +21,8 @@ export type Customer = {
   rfid: string
   city: string
   vehicle: { model: string; regNo: string }
-  batteryIds: [string, string]
+  /** One id per battery in the bike (VITE_BATTERIES_PER_BIKE) */
+  batteryIds: string[]
   plan: Plan
   status: 'active' | 'blocked'
   joinedAt: string
@@ -47,7 +48,7 @@ export type Station = {
 
 export type SwapStatus = 'success' | 'failed' | 'aborted'
 
-/** Collect → empty slot ← C.Bat1, Exchange → S.Bat1 ⇄ C.Bat2, Dispense → S.Bat2 */
+/** Collect → empty slot ← C.Bat1, Exchange → S.Bat(n) ⇄ C.Bat(n+1), Dispense → last S.Bat */
 export type StepKey = 'auth' | 'collect' | 'exchange' | 'dispense' | 'payment'
 
 export type SwapStep = {
@@ -74,7 +75,7 @@ export type FailureCode =
 export type PaymentStatus = 'paid' | 'pending' | 'failed' | 'none'
 
 export type Swap = {
-  /** Swap ID = C.Bat1 ID + C.Bat2 ID + time stamp */
+  /** Swap ID = customer battery IDs + time stamp */
   id: string
   customerId: string | null
   rfid: string
@@ -82,11 +83,12 @@ export type Swap = {
   startedAt: string
   endedAt: string
   status: SwapStatus
-  /** Customer batteries returned to the station: C.Bat1, C.Bat2 */
-  inBatteries: [string | null, string | null]
-  /** Station batteries handed to the customer: S.Bat1, S.Bat2 */
-  outBatteries: [string | null, string | null]
-  slots: { collect: number | null; exchange: number | null; dispense: number | null }
+  /** Customer batteries returned to the station: C.Bat1, C.Bat2, … */
+  inBatteries: (string | null)[]
+  /** Station batteries handed to the customer: S.Bat1, S.Bat2, … */
+  outBatteries: (string | null)[]
+  /** Exchange holds one box per extra battery (none for a 1-battery bike) */
+  slots: { collect: number | null; exchange: number[]; dispense: number | null }
   steps: SwapStep[]
   failure?: { code: FailureCode; step: StepKey; message: string; resolution: string }
   energyKwh: number

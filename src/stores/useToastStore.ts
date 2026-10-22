@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { config } from '../config'
 
 export type Toast = {
   id: number
@@ -17,7 +18,7 @@ let nextId = 1
 
 export const useToastStore = create<ToastState>((set, get) => ({
   toasts: [],
-  push: (toast, ttlMs = 4500) => {
+  push: (toast, ttlMs = config.toastSeconds * 1000) => {
     const id = nextId++
     set((s) => ({ toasts: [...s.toasts, { ...toast, id }] }))
     window.setTimeout(() => get().dismiss(id), ttlMs)

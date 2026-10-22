@@ -1,3 +1,4 @@
+import { config } from '../../config'
 import { Icon, type IconName } from '../../components/Icon'
 import { Logo, ZDiamond } from '../../components/Logo'
 import { ADMIN_CREDENTIALS } from '../../data/mock'
@@ -32,7 +33,9 @@ const portals: Array<{
     to: '/kiosk/ZS-BLR-01',
     icon: 'monitor',
     title: 'Swap Station Kiosk',
-    body: 'Interactive 10-box machine: tap card → Collect → Exchange → Dispense.',
+    body: config.openAllDoors
+      ? `Interactive ${config.boxesPerStation}-box machine: tap card → all swap doors open → swap → close.`
+      : `Interactive ${config.boxesPerStation}-box machine: tap card → Collect → Exchange → Dispense.`,
     hint: 'Koramangala Hub · ZS-BLR-01',
     accent: 'from-amber-300/30 to-amber-500/5',
   },

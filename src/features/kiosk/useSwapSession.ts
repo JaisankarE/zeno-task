@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { FAILURES, STEP_LABELS, makeSwapId, swapBill } from '../../lib/swap'
+import { FAILURES, STEP_LABELS, makeSwapId, swapBill, swapDoors, type Door } from '../../lib/swap'
 import { inr } from '../../lib/format'
+import { config } from '../../config'
 import { useZenoStore } from '../../stores/useZenoStore'
 import type { Customer, FailureCode, Station, StepKey, Swap, SwapStep } from '../../types'
 
@@ -15,24 +16,48 @@ export const SCENARIOS: Array<{ value: Scenario; label: string; hint: string }> 
   { value: 'comm-lost', label: 'Network loss', hint: 'Cloud link drops at dispense' },
 ]
 
-export const DOOR_SECONDS = 45
-const TIMEOUT_SECONDS = 9
+/** true: one tap opens every swap door together. false: Collect → Exchange → Dispense, one door at a time */
+export const OPEN_ALL_DOORS = config.openAllDoors
+/** Countdown for one door, or for all doors together when OPEN_ALL_DOORS is on */
+export const DOOR_SECONDS = OPEN_ALL_DOORS ? config.allDoorsSeconds : config.doorSeconds
+const TIMEOUT_SECONDS = config.doorTimeoutDemoSeconds
+const PACKS = config.batteriesPerBike
 const FOREIGN_BATTERY = 'ZB-0666'
+/** The "Slot jam" scenario jams the first door after Collect */
+const JAM_DOOR = 1
 
-export type Phase = 'idle' | 'auth' | 'welcome' | 'collect' | 'exchange' | 'dispense' | 'verifying' | 'done' | 'error'
-export type Await = 'insert' | 'take' | 'close' | null
+export type Phase =
+  | 'idle'
+  | 'auth'
+  | 'welcome'
+  | 'collect'
+  | 'exchange'
+  | 'dispense'
+  | 'all-doors'
+  | 'verifying'
+  | 'done'
+  | 'error'
+export type Await = 'insert' | 'take' | 'close'
+/** What the rider must do next at a box; 'closed' = door shut, waiting for the other doors */
+export type BoxTask = Await | 'closed'
 
 export type Session = {
   phase: Phase
   rfid: string
   customer: Customer | null
-  plan: { collect: number; exchange: number; dispense: number; sBat1: string; sBat2: string } | null
+  /** Doors this swap uses: Collect, Exchange × (batteries − 1), Dispense */
+  doors: Door[]
+  /** Door being worked on in one-door-at-a-time mode */
+  doorIndex: number
+  /** Boxes whose door has been opened during this session */
+  opened: number[]
   /** Battery currently sitting in each box involved in this session */
   contents: Record<number, string | null>
-  openBox: number | null
-  awaiting: Await
+  /** Open boxes and what the rider has to do at each */
+  tasks: Record<number, BoxTask>
+  /** Customer battery put into each box */
+  insertedInto: Record<number, string>
   hands: string[]
-  inserted: string[]
   steps: SwapStep[]
   startedAt: string
   deadline: number
@@ -45,12 +70,13 @@ const initial: Session = {
   phase: 'idle',
   rfid: '',
   customer: null,
-  plan: null,
+  doors: [],
+  doorIndex: 0,
+  opened: [],
   contents: {},
-  openBox: null,
-  awaiting: null,
+  tasks: {},
+  insertedInto: {},
   hands: [],
-  inserted: [],
   steps: [],
   startedAt: '',
   deadline: 0,
@@ -58,6 +84,15 @@ const initial: Session = {
   failure: null,
   result: null,
 }
+
+/** Boxes whose door is open right now, in swap order */
+export const openBoxes = (s: Session) =>
+  s.doors.filter((d) => s.tasks[d.box] !== undefined && s.tasks[d.box] !== 'closed').map((d) => d.box)
+
+/** Charged batteries the station hands out in this session */
+export const stationPacks = (s: Session) => s.doors.flatMap((d) => (d.take ? [d.take] : []))
+
+const firstTask = (door: Door): Await => (door.key === 'collect' ? 'insert' : 'take')
 
 export function useSwapSession(station: Station | undefined, scenario: Scenario) {
   const customers = useZenoStore((s) => s.customers)
@@ -101,30 +136,31 @@ export function useSwapSession(station: Station | undefined, scenario: Scenario)
     const c = s.customer
     const started = new Date(s.startedAt || Date.now())
     const success = status === 'success'
-    const cBats = c?.batteryIds ?? [null, null]
+    const out = stationPacks(s)
     const bill =
-      success && s.plan && c
+      success && c
         ? swapBill(
-            [batteries[c.batteryIds[0]].soc, batteries[c.batteryIds[1]].soc],
-            [batteries[s.plan.sBat1].soc, batteries[s.plan.sBat2].soc],
+            c.batteryIds.map((id) => batteries[id].soc),
+            out.map((id) => batteries[id].soc),
           )
         : { energyKwh: 0, amount: 0 }
-    const reached = (k: StepKey) => steps.some((x) => x.key === k)
+    const insertDoors = s.doors.filter((d) => d.key !== 'dispense')
+    const used = (box: number | undefined) => (box !== undefined && s.opened.includes(box) ? box : null)
 
     return {
-      id: makeSwapId(cBats[0], cBats[1], started),
+      id: makeSwapId(c?.batteryIds ?? [], started),
       customerId: c?.id ?? null,
       rfid: s.rfid,
       stationId: station!.id,
       startedAt: started.toISOString(),
       endedAt: new Date().toISOString(),
       status,
-      inBatteries: [s.inserted[0] ?? null, s.inserted[1] ?? null],
-      outBatteries: success && s.plan ? [s.plan.sBat1, s.plan.sBat2] : [null, null],
+      inBatteries: Array.from({ length: PACKS }, (_, j) => s.insertedInto[insertDoors[j]?.box] ?? null),
+      outBatteries: Array.from({ length: PACKS }, (_, j) => (success ? (out[j] ?? null) : null)),
       slots: {
-        collect: reached('collect') ? s.plan!.collect : null,
-        exchange: reached('exchange') ? s.plan!.exchange : null,
-        dispense: reached('dispense') ? s.plan!.dispense : null,
+        collect: used(s.doors.find((d) => d.key === 'collect')?.box),
+        exchange: s.doors.filter((d) => d.key === 'exchange' && s.opened.includes(d.box)).map((d) => d.box),
+        dispense: used(s.doors.find((d) => d.key === 'dispense')?.box),
       },
       steps,
       failure: failure
@@ -146,15 +182,15 @@ export function useSwapSession(station: Station | undefined, scenario: Scenario)
     const steps = [...ref.current.steps, step(at, false, { note: FAILURES[code].message, ...extra })]
     const result = record(code === 'USER_ABORT' ? 'aborted' : 'failed', steps, code)
     commitSwap(result)
-    const rejected = code === 'BATTERY_MISMATCH' ? ref.current.inserted.slice(-1) : []
+    // The rejected battery comes back out of its box
+    const rejected = code === 'BATTERY_MISMATCH' && extra.batteryId ? [extra.batteryId] : []
     update({
       phase: 'error',
       hands: [...ref.current.hands, ...rejected],
       steps,
       failure: code,
       result,
-      openBox: null,
-      awaiting: null,
+      tasks: {},
       message: FAILURES[code].resolution,
     })
   }
@@ -178,56 +214,64 @@ export function useSwapSession(station: Station | undefined, scenario: Scenario)
       if (!customer) return fail('RFID_INVALID', 'auth')
       if (customer.status === 'blocked') return fail('RFID_BLOCKED', 'auth')
 
+      // One empty box for C.Bat1 + one charged battery per pack in the bike
       const empty = station.slots.find((s) => s.state === 'empty')
       const ready = station.slots.filter((s) => s.state === 'ready' && s.batteryId)
-      if (!empty || ready.length < 2) return fail('NO_CHARGED_BATTERY', 'auth')
+      if (!empty || ready.length < PACKS) return fail('NO_CHARGED_BATTERY', 'auth')
 
-      const plan = {
-        collect: empty.no,
-        exchange: ready[0].no,
-        dispense: ready[1].no,
-        sBat1: ready[0].batteryId!,
-        sBat2: ready[1].batteryId!,
-      }
+      const doors = swapDoors(
+        empty.no,
+        ready.slice(0, PACKS).map((s) => ({ box: s.no, batteryId: s.batteryId! })),
+      )
       const hands = [...customer.batteryIds]
       if (scenarioRef.current === 'mismatch') hands[0] = FOREIGN_BATTERY
 
       update({
         phase: 'welcome',
-        plan,
+        doors,
         hands,
-        contents: { [plan.collect]: null, [plan.exchange]: plan.sBat1, [plan.dispense]: plan.sBat2 },
+        contents: Object.fromEntries(doors.map((d) => [d.box, d.take])),
         steps: [step('auth', true, { note: `${customer.name} · ${customer.vehicle.regNo}` })],
         message: 'Preparing your swap…',
       })
-      later(startCollect, 2600)
-    }, 1300)
+      later(OPEN_ALL_DOORS ? openAllDoors : () => openDoor(0), config.welcomeScreenMs)
+    }, config.rfidVerifyMs)
   }
 
   const deadlineFor = () =>
     Date.now() + (scenarioRef.current === 'door-timeout' ? TIMEOUT_SECONDS : DOOR_SECONDS) * 1000
 
-  // ---------- 2. Collect: empty box ← C.Bat1 ----------
-  const startCollect = () => {
-    const { plan } = ref.current
-    update({ phase: 'collect', openBox: plan!.collect, awaiting: 'insert', deadline: deadlineFor(), message: '' })
+  const jam = (door: Door) => {
+    update({ phase: 'verifying', opened: [...ref.current.opened, door.box], message: `Opening box ${door.box}…` })
+    later(() => fail('SLOT_JAM', door.key, { slot: door.box }), 1800)
   }
 
-  // ---------- 3. Exchange: take S.Bat1, insert C.Bat2 ----------
-  const startExchange = () => {
-    const { plan } = ref.current
-    if (scenarioRef.current === 'slot-jam') {
-      update({ phase: 'verifying', message: `Opening box ${plan!.exchange}…` })
-      later(() => fail('SLOT_JAM', 'exchange', { slot: plan!.exchange }), 1800)
-      return
-    }
-    update({ phase: 'exchange', openBox: plan!.exchange, awaiting: 'take', deadline: deadlineFor(), message: '' })
+  // ---------- 2a. One door at a time: Collect → Exchange… → Dispense ----------
+  const openDoor = (i: number) => {
+    const s = ref.current
+    const door = s.doors[i]
+    if (scenarioRef.current === 'slot-jam' && i === JAM_DOOR) return jam(door)
+    update({
+      phase: door.key,
+      doorIndex: i,
+      opened: [...s.opened, door.box],
+      tasks: { [door.box]: firstTask(door) },
+      deadline: deadlineFor(),
+      message: '',
+    })
   }
 
-  // ---------- 4. Dispense: take S.Bat2 ----------
-  const startDispense = () => {
-    const { plan } = ref.current
-    update({ phase: 'dispense', openBox: plan!.dispense, awaiting: 'take', deadline: deadlineFor(), message: '' })
+  // ---------- 2b. All doors at once ----------
+  const openAllDoors = () => {
+    const { doors } = ref.current
+    if (scenarioRef.current === 'slot-jam') return jam(doors[JAM_DOOR])
+    update({
+      phase: 'all-doors',
+      opened: doors.map((d) => d.box),
+      tasks: Object.fromEntries(doors.map((d) => [d.box, firstTask(d)])),
+      deadline: deadlineFor(),
+      message: '',
+    })
   }
 
   const complete = () => {
@@ -237,96 +281,128 @@ export function useSwapSession(station: Station | undefined, scenario: Scenario)
     const steps = [...s.steps, step('payment', true, { note: payNote })]
     const result = { ...draft, steps, endedAt: new Date().toISOString() }
     commitSwap(result)
-    update({ phase: 'done', steps, result, openBox: null, awaiting: null })
+    update({ phase: 'done', steps, result, tasks: {} })
   }
 
-  /** Rider puts a battery from their hands into the open box */
-  const insert = (batteryId: string) => {
+  /** First open box waiting for the given action */
+  const boxAwaiting = (task: Await) => ref.current.doors.find((d) => ref.current.tasks[d.box] === task)?.box
+
+  /** Rider puts a battery from their hands into an open box (the first one waiting for it by default) */
+  const insert = (batteryId: string, box = boxAwaiting('insert')) => {
     const s = ref.current
-    if (s.awaiting !== 'insert' || s.openBox === null) return
+    if (box === undefined || s.tasks[box] !== 'insert') return
     update({
-      contents: { ...s.contents, [s.openBox]: batteryId },
+      contents: { ...s.contents, [box]: batteryId },
       hands: s.hands.filter((h) => h !== batteryId),
-      inserted: [...s.inserted, batteryId],
-      awaiting: 'close',
+      insertedInto: { ...s.insertedInto, [box]: batteryId },
+      tasks: { ...s.tasks, [box]: 'close' },
     })
   }
 
-  /** Rider takes the charged battery out of the open box */
-  const take = () => {
+  /** Rider takes the charged battery out of an open box */
+  const take = (box: number) => {
     const s = ref.current
-    if (s.awaiting !== 'take' || s.openBox === null) return
-    const id = s.contents[s.openBox]
-    if (!id) return
+    if (s.tasks[box] !== 'take') return
+    const id = s.contents[box]
+    const door = s.doors.find((d) => d.box === box)
+    if (!id || !door) return
     update({
-      contents: { ...s.contents, [s.openBox]: null },
+      contents: { ...s.contents, [box]: null },
       hands: [...s.hands, id],
-      awaiting: s.phase === 'exchange' ? 'insert' : 'close',
+      tasks: { ...s.tasks, [box]: door.key === 'exchange' ? 'insert' : 'close' },
     })
   }
 
-  const close = () => {
-    const s = ref.current
-    if (s.awaiting !== 'close' || !s.plan || !s.customer) return
-    if (scenarioRef.current === 'door-timeout') return // simulating a rider who walked away
-    const box = s.openBox!
-    const phase = s.phase
-    update({ openBox: null, awaiting: null, phase: 'verifying' })
+  const checkingMessage = (door: Door) =>
+    door.key === 'collect'
+      ? `Reading battery ID in box ${door.box}…`
+      : door.key === 'exchange'
+        ? `Checking ${ref.current.insertedInto[door.box]} health & temperature…`
+        : 'Finalising swap & generating bill…'
 
-    if (phase === 'collect') {
-      const id = s.inserted[0]
-      update({ message: `Reading battery ID in box ${box}…` })
-      later(() => {
-        if (!s.customer!.batteryIds.includes(id)) {
-          return fail('BATTERY_MISMATCH', 'collect', { slot: box, batteryId: id, note: `${id} is not linked to ${s.rfid}. Door re-opened to return it.` })
-        }
-        update({ steps: [...ref.current.steps, step('collect', true, { slot: box, batteryId: id })] })
-        startExchange()
-      }, 1500)
-    } else if (phase === 'exchange') {
-      const id = s.inserted[1]
-      update({ message: `Checking ${id} health & temperature…` })
-      later(() => {
-        if (!s.customer!.batteryIds.includes(id)) {
-          return fail('BATTERY_MISMATCH', 'exchange', { slot: box, batteryId: id, note: `${id} is not linked to ${s.rfid}. Door re-opened to return it.` })
-        }
-        if (scenarioRef.current === 'battery-fault') {
-          return fail('BATTERY_FAULT', 'exchange', { slot: box, batteryId: id, note: `${id} reported 64°C. Battery quarantined.` })
-        }
-        update({
-          steps: [...ref.current.steps, step('exchange', true, { slot: box, batteryId: `${s.plan!.sBat1} ⇄ ${id}` })],
+  /** Station checks for one closed door. Records the step, or fails the session and returns false. */
+  const verifyDoor = (i: number): boolean => {
+    const s = ref.current
+    const door = s.doors[i]
+    const slot = door.box
+    const id = s.insertedInto[slot]
+
+    if (door.key === 'dispense') {
+      if (scenarioRef.current === 'comm-lost') {
+        fail('COMM_LOST', 'dispense', { slot, batteryId: door.take! })
+        return false
+      }
+    } else {
+      if (!s.customer!.batteryIds.includes(id)) {
+        const putBack = OPEN_ALL_DOORS ? ' Charged batteries must be returned to their boxes.' : ''
+        fail('BATTERY_MISMATCH', door.key, {
+          slot,
+          batteryId: id,
+          note: `${id} is not linked to ${s.rfid}. Door re-opened to return it.${putBack}`,
         })
-        startDispense()
-      }, 1500)
-    } else if (phase === 'dispense') {
-      update({ message: 'Finalising swap & generating bill…' })
-      later(() => {
-        if (scenarioRef.current === 'comm-lost') {
-          return fail('COMM_LOST', 'dispense', { slot: box, batteryId: s.plan!.sBat2 })
-        }
-        update({ steps: [...ref.current.steps, step('dispense', true, { slot: box, batteryId: s.plan!.sBat2 })] })
-        complete()
-      }, 1500)
+        return false
+      }
+      // The last returned battery is the one that reports overheating
+      if (scenarioRef.current === 'battery-fault' && i === s.doors.length - 2) {
+        fail('BATTERY_FAULT', door.key, { slot, batteryId: id, note: `${id} reported 64°C. Battery quarantined.` })
+        return false
+      }
     }
+
+    const batteryId = door.key === 'collect' ? id : door.key === 'exchange' ? `${door.take} ⇄ ${id}` : door.take!
+    update({ steps: [...ref.current.steps, step(door.key, true, { slot, batteryId })] })
+    return true
+  }
+
+  const close = (box: number) => {
+    const s = ref.current
+    if (s.tasks[box] !== 'close' || !s.customer) return
+    if (scenarioRef.current === 'door-timeout') return // simulating a rider who walked away
+
+    if (OPEN_ALL_DOORS) {
+      const tasks: Record<number, BoxTask> = { ...s.tasks, [box]: 'closed' }
+      update({ tasks })
+      if (!Object.values(tasks).every((t) => t === 'closed')) return
+      // Every door shut: lock them all and check the whole swap in one go
+      update({ phase: 'verifying', tasks: {}, message: 'All doors locked · checking batteries…' })
+      later(() => {
+        if (s.doors.every((_, i) => verifyDoor(i))) complete()
+      }, config.batteryCheckMs)
+      return
+    }
+
+    const i = s.doorIndex
+    update({ phase: 'verifying', tasks: {}, message: checkingMessage(s.doors[i]) })
+    later(() => {
+      if (!verifyDoor(i)) return
+      if (i + 1 < s.doors.length) openDoor(i + 1)
+      else complete()
+    }, config.batteryCheckMs)
   }
 
   const cancel = () => {
     const s = ref.current
-    if (!['welcome', 'collect', 'exchange', 'dispense'].includes(s.phase)) return
-    const at: StepKey = s.phase === 'welcome' ? 'auth' : (s.phase as StepKey)
-    fail('USER_ABORT', at, { slot: s.openBox ?? undefined })
+    if (!['welcome', 'collect', 'exchange', 'dispense', 'all-doors'].includes(s.phase)) return
+    const door = s.doors.find((d) => openBoxes(s).includes(d.box))
+    const at: StepKey = s.phase === 'welcome' ? 'auth' : (door?.key ?? 'collect')
+    fail('USER_ABORT', at, { slot: door?.box })
   }
 
   // Door timeout watchdog
   const [now, setNow] = useState(() => Date.now())
-  const active = session.phase === 'collect' || session.phase === 'exchange' || session.phase === 'dispense'
+  const active = ['collect', 'exchange', 'dispense', 'all-doors'].includes(session.phase)
   useEffect(() => {
     if (!active) return
     const id = window.setInterval(() => {
       setNow(Date.now())
       const s = ref.current
       if (s.deadline && Date.now() > s.deadline) {
-        fail('DOOR_TIMEOUT', s.phase as StepKey, { slot: s.openBox ?? undefined, note: `Box ${s.openBox} door not closed in time.` })
+        const open = openBoxes(s)
+        const door = s.doors.find((d) => d.box === open[0])
+        fail('DOOR_TIMEOUT', door?.key ?? 'collect', {
+          slot: door?.box,
+          note: `Box ${open.join(', ')} door${open.length > 1 ? 's' : ''} not closed in time.`,
+        })
       }
     }, 250)
     return () => window.clearInterval(id)

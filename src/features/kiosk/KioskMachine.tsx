@@ -98,7 +98,10 @@ export function KioskMachine({
       {/* ---------- Lower box section ---------- */}
       <div className="relative -mt-px rounded-b-[28px] bg-gradient-to-b from-cream-200 via-cream-200 to-cream-300 px-5 pb-10 pt-5 shadow-[0_40px_60px_-25px_rgb(0_0_0/0.7)]">
         <div className="pointer-events-none absolute inset-x-0 top-0 h-3 bg-gradient-to-b from-black/10 to-transparent" />
-        <div className="grid grid-cols-5 gap-2.5 rounded-xl bg-cream-300/70 p-2.5 shadow-[inset_0_2px_6px_rgb(0_0_0/0.12)]">
+        <div
+          className="grid gap-2.5 rounded-xl bg-cream-300/70 p-2.5 shadow-[inset_0_2px_6px_rgb(0_0_0/0.12)]"
+          style={{ gridTemplateColumns: `repeat(${columnsFor(boxes.length)}, minmax(0, 1fr))` }}
+        >
           {boxes.map((b) => (
             <Box key={b.no} box={b} />
           ))}
@@ -117,6 +120,12 @@ export function KioskMachine({
       <div className="mx-auto mt-1 h-6 w-[90%] rounded-[50%] bg-black/50 blur-xl" />
     </div>
   )
+}
+
+/** At most 5 boxes per row, rows filled evenly (10 → 5×2, 8 → 4×2, 12 → 4×3) */
+function columnsFor(count: number) {
+  const rows = Math.ceil(count / 5)
+  return Math.ceil(count / rows)
 }
 
 function Box({ box }: { box: BoxView }) {
