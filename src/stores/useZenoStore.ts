@@ -110,6 +110,18 @@ export const useZenoStore = create<ZenoState>()(
 
       resetDemo: () => set(createDemoData()),
     }),
-    { name: 'zeno-demo-data', version: 1 },
+    {
+      name: 'zeno-demo-data',
+      // v2: every swap is billed (no unlimited plan) — old saved data is regenerated
+      version: 2,
+      migrate: () => createDemoData() as unknown as ZenoState,
+    },
   ),
 )
+
+// Keep tabs in sync: a swap on the kiosk tab updates the rider/admin tabs instantly
+if (typeof window !== 'undefined') {
+  window.addEventListener('storage', (e) => {
+    if (e.key === 'zeno-demo-data') void useZenoStore.persist.rehydrate()
+  })
+}

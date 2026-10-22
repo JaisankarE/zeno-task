@@ -184,6 +184,14 @@ export function CustomerDashboard() {
               )
             }
           />
+        ) : dues.length > 0 ? (
+          <Alert
+            tone="amber"
+            icon="wallet"
+            title={`Swap bill pending · ${inr(dueTotal)}`}
+            body={`${dues.length} swap bill${dues.length > 1 ? 's' : ''} waiting for payment. Batteries at ${lowest}%+, about ${range} km of range.`}
+            action={<Button onClick={() => setPaying(dues)}>Pay {inr(dueTotal)}</Button>}
+          />
         ) : (
           <Alert tone="green" icon="zap" title="You're good to ride" body={`Both batteries above ${lowest}%. About ${range} km of range left.`} />
         )}
@@ -341,7 +349,7 @@ function Alert({
   action,
 }: {
   tone: 'red' | 'amber' | 'green'
-  icon: 'lock' | 'battery' | 'zap'
+  icon: 'lock' | 'battery' | 'zap' | 'wallet'
   title: string
   body: string
   action?: ReactNode

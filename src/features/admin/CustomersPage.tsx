@@ -88,7 +88,7 @@ export function CustomersPage() {
                     <td className="px-3 py-3"><BatteryBar soc={b1.soc} id={b1.id} /></td>
                     <td className="px-3 py-3"><BatteryBar soc={b2.soc} id={b2.id} /></td>
                     <td className="px-3 py-3">
-                      <Badge tone={c.plan === 'Unlimited monthly' ? 'violet' : 'slate'}>{c.plan}</Badge>
+                      <Badge>{c.plan}</Badge>
                     </td>
                     <td className="px-3 py-3 text-right font-tabular">
                       <span className="font-semibold text-slate-800">{st?.total ?? 0}</span>

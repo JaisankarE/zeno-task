@@ -109,7 +109,6 @@ export function useSwapSession(station: Station | undefined, scenario: Scenario)
             [batteries[s.plan.sBat1].soc, batteries[s.plan.sBat2].soc],
           )
         : { energyKwh: 0, amount: 0 }
-    const isPlan = c?.plan === 'Unlimited monthly'
     const reached = (k: StepKey) => steps.some((x) => x.key === k)
 
     return {
@@ -137,8 +136,8 @@ export function useSwapSession(station: Station | undefined, scenario: Scenario)
           }
         : undefined,
       energyKwh: bill.energyKwh,
-      amount: isPlan ? 0 : bill.amount,
-      payment: success ? (isPlan ? 'included' : 'pending') : 'none',
+      amount: bill.amount,
+      payment: success ? 'pending' : 'none',
     }
   }
 
@@ -234,8 +233,7 @@ export function useSwapSession(station: Station | undefined, scenario: Scenario)
   const complete = () => {
     const s = ref.current
     const draft = record('success', s.steps, null)
-    const payNote =
-      draft.payment === 'included' ? 'Covered by Unlimited monthly plan' : `${inr(draft.amount)} bill sent to Zeno app`
+    const payNote = `${inr(draft.amount)} bill sent to Zeno app · pay from the rider portal`
     const steps = [...s.steps, step('payment', true, { note: payNote })]
     const result = { ...draft, steps, endedAt: new Date().toISOString() }
     commitSwap(result)

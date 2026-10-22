@@ -199,7 +199,7 @@ export function KioskScreen({
           ))}
         </div>
         <p className="mt-[2.4cqw] text-[3cqw] text-white/70">
-          {r.payment === 'included' ? 'Covered by your monthly plan' : <>Bill <b className="text-white">{inr(r.amount)}</b> sent to your Zeno app</>}
+          Bill <b className="text-white">{inr(r.amount)}</b> sent to your Zeno app — pay from the rider portal
         </p>
         <button onClick={onFinish} className="mt-[3cqw] rounded-[1.5cqw] bg-white px-[4cqw] py-[1.4cqw] text-[3cqw] font-bold text-ink-900">
           Done

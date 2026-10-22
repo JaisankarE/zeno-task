@@ -11,7 +11,7 @@ export type Battery = {
   location: string
 }
 
-export type Plan = 'Pay per swap' | 'Unlimited monthly'
+export type Plan = 'Pay per swap'
 
 export type Customer = {
   id: string
@@ -71,7 +71,7 @@ export type FailureCode =
   | 'COMM_LOST'
   | 'USER_ABORT'
 
-export type PaymentStatus = 'paid' | 'pending' | 'failed' | 'included' | 'none'
+export type PaymentStatus = 'paid' | 'pending' | 'failed' | 'none'
 
 export type Swap = {
   /** Swap ID = C.Bat1 ID + C.Bat2 ID + time stamp */

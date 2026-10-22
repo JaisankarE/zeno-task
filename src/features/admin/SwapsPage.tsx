@@ -101,7 +101,6 @@ export function SwapsPage() {
             <option value="paid">Paid</option>
             <option value="pending">Pending</option>
             <option value="failed">Payment failed</option>
-            <option value="included">In plan</option>
             <option value="none">No charge</option>
           </select>
           <Button variant="secondary" icon="download" onClick={exportCsv}>

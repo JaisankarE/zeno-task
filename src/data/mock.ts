@@ -28,13 +28,13 @@ const CUSTOMER_SEED: Array<
   [name: string, phone: string, rfid: string, city: string, model: string, regNo: string, plan: Customer['plan'], soc: [number, number]]
 > = [
   ['Arjun Mehta', '+91 98450 12345', 'RF-7A3F21C9', 'Bengaluru', 'Zeno Volt X', 'KA 05 MX 4521', 'Pay per swap', [14, 11]],
-  ['Priya Raman', '+91 94440 23871', 'RF-1B8C4D02', 'Chennai', 'Zeno Volt X', 'TN 09 BZ 1182', 'Unlimited monthly', [62, 58]],
+  ['Priya Raman', '+91 94440 23871', 'RF-1B8C4D02', 'Chennai', 'Zeno Volt X', 'TN 09 BZ 1182', 'Pay per swap', [62, 58]],
   ['Karthik Subramanian', '+91 99620 77810', 'RF-9E2A6F14', 'Chennai', 'Zeno Cargo', 'TN 22 CK 9031', 'Pay per swap', [23, 19]],
   ['Divya Nair', '+91 97390 44128', 'RF-3C5D8E77', 'Bengaluru', 'Zeno Volt S', 'KA 01 HN 7744', 'Pay per swap', [81, 79]],
-  ['Rahul Verma', '+91 98861 30954', 'RF-6F1E0A35', 'Bengaluru', 'Zeno Cargo', 'KA 03 JP 2210', 'Unlimited monthly', [37, 41]],
+  ['Rahul Verma', '+91 98861 30954', 'RF-6F1E0A35', 'Bengaluru', 'Zeno Cargo', 'KA 03 JP 2210', 'Pay per swap', [37, 41]],
   ['Sneha Iyer', '+91 90030 66721', 'RF-2D7B9C46', 'Chennai', 'Zeno Volt S', 'TN 07 DA 5567', 'Pay per swap', [55, 52]],
   ['Vikram Reddy', '+91 99001 84432', 'RF-8A4E3B58', 'Bengaluru', 'Zeno Volt X', 'KA 51 MR 3390', 'Pay per swap', [9, 12]],
-  ['Ananya Krishnan', '+91 95000 11908', 'RF-5B9F7D61', 'Chennai', 'Zeno Volt S', 'TN 10 AZ 8815', 'Unlimited monthly', [92, 90]],
+  ['Ananya Krishnan', '+91 95000 11908', 'RF-5B9F7D61', 'Chennai', 'Zeno Volt S', 'TN 10 AZ 8815', 'Pay per swap', [92, 90]],
   ['Mohammed Irfan', '+91 98400 52316', 'RF-4E6C2A83', 'Chennai', 'Zeno Cargo', 'TN 02 BQ 4402', 'Pay per swap', [44, 47]],
   ['Lakshmi Prasad', '+91 97411 90287', 'RF-0C3A5E92', 'Bengaluru', 'Zeno Volt X', 'KA 04 KL 6123', 'Pay per swap', [68, 71]],
   ['Suresh Kumar', '+91 94443 70519', 'RF-7D2F8B04', 'Chennai', 'Zeno Cargo', 'TN 11 CE 7781', 'Pay per swap', [31, 27]],
@@ -181,7 +181,6 @@ export function createDemoData(now = new Date()): DemoData {
       const success = status === 'success'
       const reachedIdx = (k2: StepKey) => order.indexOf(k2) <= reached
       const bill = success ? swapBill(inSoc, outSoc) : { energyKwh: 0, amount: 0 }
-      const isPlan = customer.plan === 'Unlimited monthly'
       const recent = now.getTime() - start.getTime() < 1000 * 60 * 60 * 36
 
       swaps.push({
@@ -209,16 +208,14 @@ export function createDemoData(now = new Date()): DemoData {
             }
           : undefined,
         energyKwh: bill.energyKwh,
-        amount: isPlan ? 0 : bill.amount,
+        amount: bill.amount,
         payment: !success
           ? 'none'
-          : isPlan
-            ? 'included'
-            : recent && rand() < 0.6
-              ? 'pending'
-              : rand() < 0.04
-                ? 'failed'
-                : 'paid',
+          : recent && rand() < 0.6
+            ? 'pending'
+            : rand() < 0.04
+              ? 'failed'
+              : 'paid',
       })
     }
   }

@@ -20,7 +20,6 @@ const paymentTone: Record<PaymentStatus, [Tone, string]> = {
   paid: ['green', 'Paid'],
   pending: ['amber', 'Pending'],
   failed: ['red', 'Payment failed'],
-  included: ['violet', 'In plan'],
   none: ['slate', 'No charge'],
 }
 
