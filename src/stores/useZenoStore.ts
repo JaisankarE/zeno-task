@@ -8,6 +8,8 @@ type ZenoState = DemoData & {
   commitSwap: (swap: Swap) => void
   payBill: (swapId: string) => void
   payAll: (customerId: string) => void
+  /** Testing helper: overwrite the state of charge of specific batteries */
+  setBatterySoc: (socById: Record<string, number>) => void
   /** Fast-charge simulation for docked batteries at one station */
   tickCharging: (stationId: string) => void
   resetDemo: () => void
@@ -73,6 +75,15 @@ export const useZenoStore = create<ZenoState>()(
             c.id === customerId ? { ...c, status: 'active' as const } : c,
           )
           return { swaps, customers }
+        }),
+
+      setBatterySoc: (socById) =>
+        set((state) => {
+          const batteries = { ...state.batteries }
+          for (const [id, soc] of Object.entries(socById)) {
+            if (batteries[id]) batteries[id] = { ...batteries[id], soc }
+          }
+          return { batteries }
         }),
 
       tickCharging: (stationId) =>

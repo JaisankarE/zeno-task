@@ -50,15 +50,21 @@ export function Landing() {
       <ZDiamond className="pointer-events-none absolute -left-20 bottom-0 size-72 text-zeno-400/[0.06]" strokeWidth={3} />
 
       <div className="relative mx-auto flex min-h-screen max-w-6xl flex-col px-6 py-8">
-        <header className="flex items-center justify-between animate-fade-in">
+        <header className="flex items-center gap-3 animate-fade-in">
           <Logo subtitle="Battery Swap Network" />
-          <span className="hidden items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-slate-300 sm:flex">
+          <span className="ml-auto hidden items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-slate-300 sm:flex">
             <span className="relative flex size-2">
               <span className="absolute inline-flex size-full rounded-full bg-zeno-400 animate-pulse-ring" />
               <span className="relative inline-flex size-2 rounded-full bg-zeno-400" />
             </span>
             {online} stations live
           </span>
+          <a
+            href="/me"
+            className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-semibold text-slate-300 transition hover:border-zeno-400/40 hover:text-white max-sm:ml-auto"
+          >
+            <Icon name="user" className="size-3.5" /> About me
+          </a>
         </header>
 
         <section className="flex flex-1 flex-col justify-center py-16">

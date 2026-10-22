@@ -26,6 +26,7 @@ export function CustomerDashboard() {
   const allSwaps = useZenoStore((s) => s.swaps)
   const [tab, setTab] = useState<Tab>('overview')
   const [paying, setPaying] = useState<Swap[] | null>(null)
+  const [draining, setDraining] = useState(false)
 
   const customer = customers.find((c) => c.id === customerId)
   const swaps = useMemo(() => allSwaps.filter((s) => s.customerId === customerId), [allSwaps, customerId])
@@ -47,6 +48,28 @@ export function CustomerDashboard() {
     .sort((a, b) => a.distanceKm - b.distanceKm)
   const best = nearby.find((s) => s.status === 'online' && s.slots.filter((x) => x.state === 'ready').length >= 2)
   const failedCount = swaps.filter((s) => s.status !== 'success').length
+
+  /** Testing helper: simulate a long ride so the low-battery → swap flow can be tried */
+  const drainBatteries = () => {
+    const targets: Record<string, number> = { [b1.id]: 8, [b2.id]: 11 }
+    setDraining(true)
+    const timer = window.setInterval(() => {
+      const { batteries: live, setBatterySoc } = useZenoStore.getState()
+      const next: Record<string, number> = {}
+      let done = true
+      for (const [id, target] of Object.entries(targets)) {
+        const soc = Math.max(target, live[id].soc - 3)
+        next[id] = soc
+        if (soc > target) done = false
+      }
+      setBatterySoc(next)
+      if (done) {
+        window.clearInterval(timer)
+        setDraining(false)
+        toast({ tone: 'info', title: 'Batteries drained', body: 'Battery low — head to a station to swap.' })
+      }
+    }, 45)
+  }
 
   return (
     <div className="min-h-screen bg-slate-50">
@@ -100,6 +123,19 @@ export function CustomerDashboard() {
                   <p className="text-xs text-slate-400">Swaps done</p>
                 </div>
               </div>
+              <button
+                onClick={drainBatteries}
+                disabled={draining || lowest <= 11}
+                title="Testing helper — simulates a long ride"
+                className="mt-6 inline-flex items-center gap-2 rounded-xl border border-dashed border-amber-400/40 bg-amber-400/10 px-3.5 py-2 text-xs font-semibold text-amber-200 transition hover:bg-amber-400/20 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {draining ? (
+                  <span className="size-3.5 animate-spin rounded-full border-2 border-amber-200 border-r-transparent" />
+                ) : (
+                  <Icon name="battery" className="size-4" />
+                )}
+                {draining ? 'Draining…' : lowest <= 11 ? 'Batteries already empty' : 'Empty my batteries (test)'}
+              </button>
             </div>
 
             <div className="flex gap-4 animate-fade-up" style={{ animationDelay: '120ms' }}>
@@ -140,7 +176,7 @@ export function CustomerDashboard() {
             action={
               best && (
                 <Link
-                  to={`/kiosk/${best.id}`}
+                  to={`/kiosk/${best.id}?rider=${customer.id}`}
                   className="inline-flex h-10 items-center gap-2 rounded-xl bg-amber-500 px-4 text-sm font-semibold text-white shadow-lg shadow-amber-500/25 transition hover:bg-amber-600"
                 >
                   <Icon name="pin" /> Go swap now

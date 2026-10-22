@@ -1,5 +1,6 @@
 import { useEffect } from 'react'
 import { Toaster } from '../components/ui'
+import { AboutMe } from '../features/about/AboutMe'
 import { AdminLayout } from '../features/admin/AdminLayout'
 import { AdminLogin } from '../features/admin/AdminLogin'
 import { CustomerDashboard } from '../features/customer/CustomerDashboard'
@@ -25,7 +26,14 @@ function Routes() {
   if (path === '/rider/login') return customerId ? <Redirect to="/rider" /> : <CustomerLogin />
   if (path.startsWith('/rider')) return customerId ? <CustomerDashboard /> : <Redirect to="/rider/login" />
 
-  if (path.startsWith('/kiosk')) return <KioskPage stationId={path.split('/')[2]} />
+  if (path === '/me' || path === '/me/') return <AboutMe />
+
+  if (path.startsWith('/kiosk')) {
+    // e.g. /kiosk/ZS-BLR-01?rider=CU-0101 — opened from the rider portal with the card preselected
+    const [route, query] = path.split('?')
+    const riderId = new URLSearchParams(query).get('rider') ?? undefined
+    return <KioskPage key={route} stationId={route.split('/')[2]} riderId={riderId} />
+  }
 
   return <Landing />
 }

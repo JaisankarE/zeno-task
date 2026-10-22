@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { Icon } from '../../components/Icon'
-import { Logo } from '../../components/Logo'
+import { Logo, ZDiamond } from '../../components/Logo'
 import { StationStatusBadge } from '../../components/StatusBadges'
 import { SwapTimeline } from '../../components/SwapTimeline'
 import { cx } from '../../lib/cx'
@@ -15,7 +15,7 @@ import { SCENARIOS, useSwapSession, type Scenario } from './useSwapSession'
 
 const UNKNOWN_RFID = 'RF-DEADBEEF'
 
-export function KioskPage({ stationId }: { stationId?: string }) {
+export function KioskPage({ stationId, riderId }: { stationId?: string; riderId?: string }) {
   const stations = useZenoStore((s) => s.stations)
   const customers = useZenoStore((s) => s.customers)
   const batteries = useZenoStore((s) => s.batteries)
@@ -77,6 +77,9 @@ export function KioskPage({ stationId }: { stationId?: string }) {
   })
 
   const cardList = [...customers].sort((a, b) => Number(b.city === station.city) - Number(a.city === station.city))
+  // Opened from the rider portal: only this rider's card is in hand
+  const rider = riderId ? customers.find((c) => c.id === riderId) : undefined
+  const canTap = idle && station.status === 'online'
 
   return (
     <div className="min-h-screen bg-ink-950 text-white">
@@ -137,7 +140,10 @@ export function KioskPage({ stationId }: { stationId?: string }) {
             <KioskMachine
               boxes={boxes}
               readerActive={idle && station.status === 'online'}
-              onReaderClick={() => idle && document.getElementById('card-reader')?.scrollIntoView({ behavior: 'smooth' })}
+              onReaderClick={() => {
+                if (rider && canTap) tap(rider.rfid)
+                else if (idle) document.getElementById('card-reader')?.scrollIntoView({ behavior: 'smooth' })
+              }}
               screen={
                 <KioskScreen
                   station={station}
@@ -159,6 +165,28 @@ export function KioskPage({ stationId }: { stationId?: string }) {
 
         {/* Simulator controls */}
         <aside className="space-y-4">
+          {rider ? (
+            <Panel id="card-reader" step="1" title="Your RFID card" subtitle={idle ? 'Tap it on the reader to start your swap' : 'Session in progress'}>
+              <RiderCard
+                name={rider.name}
+                rfid={rider.rfid}
+                vehicle={`${rider.vehicle.model} · ${rider.vehicle.regNo}`}
+                socs={rider.batteryIds.map((id) => batteries[id].soc)}
+                blocked={rider.status === 'blocked'}
+                active={!idle}
+              />
+              <button
+                disabled={!canTap}
+                onClick={() => tap(rider.rfid)}
+                className="mt-3 flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-zeno-500 text-sm font-semibold shadow-lg shadow-zeno-500/25 transition hover:bg-zeno-400 disabled:bg-white/10 disabled:text-slate-400 disabled:shadow-none"
+              >
+                <Icon name="nfc" /> {idle ? 'Tap card on reader' : 'Card verified'}
+              </button>
+              <Link to="/rider" className="mt-3 flex items-center justify-center gap-1 text-[11px] font-medium text-slate-400 hover:text-white">
+                <Icon name="chevronLeft" className="size-3" /> Back to my dashboard
+              </Link>
+            </Panel>
+          ) : (
           <Panel id="card-reader" step="1" title="Tap an RFID card" subtitle={idle ? 'Pick a rider to start a session' : 'Session in progress'}>
             <div className="scrollbar-thin -mx-1 max-h-[268px] space-y-1.5 overflow-y-auto px-1">
               {cardList.map((c) => {
@@ -211,6 +239,7 @@ export function KioskPage({ stationId }: { stationId?: string }) {
               </button>
             </div>
           </Panel>
+          )}
 
           <Panel step="2" title="Rider's hands" subtitle={handsHint(session.awaiting, insertable.length > 0)}>
             {session.hands.length === 0 ? (
@@ -295,6 +324,55 @@ export function KioskPage({ stationId }: { stationId?: string }) {
             )}
           </Panel>
         </aside>
+      </div>
+    </div>
+  )
+}
+
+/** Physical-looking RFID card for the rider who came from the portal */
+function RiderCard({
+  name,
+  rfid,
+  vehicle,
+  socs,
+  blocked,
+  active,
+}: {
+  name: string
+  rfid: string
+  vehicle: string
+  socs: number[]
+  blocked: boolean
+  active: boolean
+}) {
+  return (
+    <div
+      className={cx(
+        'relative aspect-[1.6] overflow-hidden rounded-2xl bg-gradient-to-br from-zeno-500 via-zeno-700 to-ink-800 p-4 shadow-xl shadow-black/40 transition duration-500',
+        active ? 'scale-[0.97] ring-2 ring-zeno-300' : 'animate-float',
+      )}
+    >
+      <ZDiamond className="absolute -bottom-8 -right-8 size-36 text-white/10" strokeWidth={4} />
+      <div className="flex items-start justify-between">
+        <span className="font-display text-sm font-bold">
+          zeno<span className="text-zeno-200">swap</span>
+        </span>
+        <Icon name="nfc" className="size-6 text-white/80" />
+      </div>
+      <div className="mt-3 h-6 w-9 rounded-md bg-gradient-to-br from-amber-200 to-amber-400 opacity-90" />
+      <div className="absolute inset-x-4 bottom-4">
+        <p className="font-mono text-sm tracking-[0.18em] text-white">{rfid}</p>
+        <div className="mt-1 flex items-end justify-between gap-2">
+          <div className="min-w-0">
+            <p className="truncate text-sm font-semibold">{name}</p>
+            <p className="truncate text-[10px] text-white/60">{vehicle}</p>
+          </div>
+          {blocked ? (
+            <span className="rounded-md bg-rose-500/30 px-1.5 py-0.5 text-[10px] font-bold text-rose-100">BLOCKED</span>
+          ) : (
+            <span className="rounded-md bg-black/25 px-2 py-0.5 text-[11px] font-bold font-tabular">{socs.join('% · ')}%</span>
+          )}
+        </div>
       </div>
     </div>
   )
